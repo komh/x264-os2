@@ -274,10 +274,8 @@ int main( int argc, char **argv )
 
     FAIL_IF_ERROR( x264_threading_init(), "unable to initialize threading\n" )
 
-#ifdef _WIN32
-    _setmode(_fileno(stdin), _O_BINARY);
-    _setmode(_fileno(stdout), _O_BINARY);
-#endif
+    set_bin_mode(stdin);
+    set_bin_mode(stdout);
 
     GetConsoleTitle( originalCTitle, sizeof(originalCTitle) );
 

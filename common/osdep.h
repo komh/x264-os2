@@ -43,6 +43,20 @@
 #ifdef _WIN32
 #include <io.h>    // _setmode()
 #include <fcntl.h> // _O_BINARY
+#include <stdio.h> // _fileno
+#define set_bin_mode(stream) _setmode(_fileno(stream), _O_BINARY)
+#elif defined(SYS_OS2)
+#include <io.h>         // isatty(), setmode()
+#include <fcntl.h>      // O_BINARY
+#include <stdio.h>      // FILE, fileno()
+
+static inline void set_bin_mode(FILE *stream)
+{
+    if(!isatty(fileno(stream)))
+        setmode(fileno(stream), O_BINARY);
+}
+#else
+#define set_bin_mode(stream)
 #endif
 
 #ifdef __ICL
