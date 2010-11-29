@@ -557,9 +557,12 @@ case $host_cpu in
         elif [ "$SYS" = WINDOWS -o "$SYS" = CYGWIN ]; then
             ASFLAGS="$ASFLAGS -f win32 -DPREFIX"
             LDFLAGS="$LDFLAGS -Wl,--large-address-aware"
+        elif [ "$SYS" = OS2 ]; then
+            ASFLAGS="$ASFLAGS -f aout -DPREFIX"
         else
             ASFLAGS="$ASFLAGS -f elf"
         fi
+        as_check || AS="nasm"
         ;;
     x86_64)
         ARCH="X86_64"
