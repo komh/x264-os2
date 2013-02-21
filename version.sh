@@ -1,8 +1,8 @@
-#!/bin/bash
+#!/bin/sh
 [ -n "$1" ] && cd $1
 git rev-list HEAD | sort > config.git-hash
 LOCALVER=`wc -l config.git-hash | awk '{print $1}'`
-if [ $LOCALVER \> 1 ] ; then
+if [ $LOCALVER -gt 1 ] ; then
     VER=`git rev-list origin/master | sort | join config.git-hash - | wc -l | awk '{print $1}'`
     VER_DIFF=$(($LOCALVER-$VER))
     echo "#define X264_REV $VER"
