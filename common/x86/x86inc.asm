@@ -61,7 +61,11 @@
 %endif
 
 %macro SECTION_RODATA 0-1 16
-    SECTION .rodata align=%1
+    %ifidn __OUTPUT_FORMAT__,aout
+        section .text
+    %else
+        SECTION .rodata align=%1
+    %endif
 %endmacro
 
 %macro SECTION_TEXT 0-1 16
