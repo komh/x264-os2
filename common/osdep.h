@@ -93,6 +93,7 @@ static inline void set_bin_mode(FILE *stream)
 #else
 #define DECLARE_ALIGNED( var, n ) var __attribute__((aligned(n)))
 #endif
+#define ALIGNED_32( var ) DECLARE_ALIGNED( var, 32 )
 #define ALIGNED_16( var ) DECLARE_ALIGNED( var, 16 )
 #define ALIGNED_8( var )  DECLARE_ALIGNED( var, 8 )
 #define ALIGNED_4( var )  DECLARE_ALIGNED( var, 4 )
@@ -124,8 +125,25 @@ static inline void set_bin_mode(FILE *stream)
 
 #define EXPAND(x) x
 
+#if HAVE_32B_STACK_ALIGNMENT
+#define ALIGNED_ARRAY_32( type, name, sub1, ... )\
+    ALIGNED_32( type name sub1 __VA_ARGS__ )
+#else
 #define ALIGNED_ARRAY_32( ... ) EXPAND( ALIGNED_ARRAY_EMU( 31, __VA_ARGS__ ) )
+#endif
+
 #define ALIGNED_ARRAY_64( ... ) EXPAND( ALIGNED_ARRAY_EMU( 63, __VA_ARGS__ ) )
+
+/* For AVX2 */
+#if ARCH_X86 || ARCH_X86_64
+#define NATIVE_ALIGN 32
+#define ALIGNED_N ALIGNED_32
+#define ALIGNED_ARRAY_N ALIGNED_ARRAY_32
+#else
+#define NATIVE_ALIGN 16
+#define ALIGNED_N ALIGNED_16
+#define ALIGNED_ARRAY_N ALIGNED_ARRAY_16
+#endif
 
 #define UNINIT(x) x=x
 
@@ -218,6 +236,25 @@ int x264_threading_init( void );
 #define x264_threading_init() 0
 #endif
 
+static ALWAYS_INLINE int x264_pthread_fetch_and_add( int *val, int add, x264_pthread_mutex_t *mutex )
+{
+#if HAVE_THREAD
+#if defined(__GNUC__) && (__GNUC__ > 4 || __GNUC__ == 4 && __GNUC_MINOR__ > 0) && ARCH_X86
+    return __sync_fetch_and_add( val, add );
+#else
+    x264_pthread_mutex_lock( mutex );
+    int res = *val;
+    *val += add;
+    x264_pthread_mutex_unlock( mutex );
+    return res;
+#endif
+#else
+    int res = *val;
+    *val += add;
+    return res;
+#endif
+}
+
 #define WORD_SIZE sizeof(void*)
 
 #define asm __asm__
@@ -267,6 +304,13 @@ static ALWAYS_INLINE uint16_t endian_fix16( uint16_t x )
     return (x<<8)|(x>>8);
 }
 #endif
+
+/* For values with 4 bits or less. */
+static int ALWAYS_INLINE x264_ctz_4bit( uint32_t x )
+{
+    static uint8_t lut[16] = {4,0,1,0,2,0,1,0,3,0,1,0,2,0,1,0};
+    return lut[x];
+}
 
 #if defined(__GNUC__) && (__GNUC__ > 3 || __GNUC__ == 3 && __GNUC_MINOR__ > 3)
 #define x264_clz(x) __builtin_clz(x)

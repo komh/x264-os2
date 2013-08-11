@@ -1118,7 +1118,8 @@ parse_error:
             total_qp_aq += qp_aq;
             p = next;
         }
-        h->pps->i_pic_init_qp = SPEC_QP( (int)(total_qp_aq / rc->num_entries + 0.5) );
+        if( !h->param.b_stitchable )
+            h->pps->i_pic_init_qp = SPEC_QP( (int)(total_qp_aq / rc->num_entries + 0.5) );
 
         x264_free( stats_buf );
 
@@ -1667,7 +1668,8 @@ int x264_ratecontrol_mb( x264_t *h, int bits )
             rc->qpm = x264_clip3f( (prev_row_qp + rc->qpm)*0.5f, prev_row_qp + 1.0f, qp_max );
             rc->qpa_rc = rc->qpa_rc_prev;
             rc->qpa_aq = rc->qpa_aq_prev;
-            h->fdec->i_row_bits[y] = h->fdec->i_row_bits[y-SLICE_MBAFF] = 0;
+            h->fdec->i_row_bits[y] = 0;
+            h->fdec->i_row_bits[y-SLICE_MBAFF] = 0;
             return -1;
         }
     }
@@ -1683,7 +1685,8 @@ int x264_ratecontrol_mb( x264_t *h, int bits )
             rc->qpm = qp_max;
             rc->qpa_rc = rc->qpa_rc_prev;
             rc->qpa_aq = rc->qpa_aq_prev;
-            h->fdec->i_row_bits[y] = h->fdec->i_row_bits[y-SLICE_MBAFF] = 0;
+            h->fdec->i_row_bits[y] = 0;
+            h->fdec->i_row_bits[y-SLICE_MBAFF] = 0;
             return -1;
         }
     }
@@ -2591,14 +2594,16 @@ void x264_threads_distribute_ratecontrol( x264_t *h )
     if( h->i_frame == 0 )
         for( int i = 0; i < h->param.i_threads; i++ )
         {
-            x264_ratecontrol_t *t = h->thread[i]->rc;
-            memcpy( t->row_preds, rc->row_preds, sizeof(rc->row_preds) );
+            x264_t *t = h->thread[i];
+            if( t != h )
+                memcpy( t->rc->row_preds, rc->row_preds, sizeof(rc->row_preds) );
         }
 
     for( int i = 0; i < h->param.i_threads; i++ )
     {
         x264_t *t = h->thread[i];
-        memcpy( t->rc, rc, offsetof(x264_ratecontrol_t, row_pred) );
+        if( t != h )
+            memcpy( t->rc, rc, offsetof(x264_ratecontrol_t, row_pred) );
         t->rc->row_pred = &t->rc->row_preds[h->sh.i_type];
         /* Calculate the planned slice size. */
         if( rc->b_vbv && rc->frame_size_planned )
