@@ -1,7 +1,7 @@
 ;*****************************************************************************
 ;* cpu-a.asm: x86 cpu utilities
 ;*****************************************************************************
-;* Copyright (C) 2003-2013 x264 project
+;* Copyright (C) 2003-2014 x264 project
 ;*
 ;* Authors: Laurent Aimar <fenrir@via.ecp.fr>
 ;*          Loren Merritt <lorenm@u.washington.edu>
@@ -144,17 +144,6 @@ cglobal cpu_emms
 ;-----------------------------------------------------------------------------
 cglobal cpu_sfence
     sfence
-    ret
-
-;-----------------------------------------------------------------------------
-; void cpu_mask_misalign_sse( void )
-;-----------------------------------------------------------------------------
-cglobal cpu_mask_misalign_sse
-    sub   rsp, 4
-    stmxcsr [rsp]
-    or dword [rsp], 1<<17
-    ldmxcsr [rsp]
-    add   rsp, 4
     ret
 
 cextern intel_cpu_indicator_init

@@ -1,10 +1,11 @@
 /*****************************************************************************
  * osdep.h: platform-specific code
  *****************************************************************************
- * Copyright (C) 2007-2013 x264 project
+ * Copyright (C) 2007-2014 x264 project
  *
  * Authors: Loren Merritt <lorenm@u.washington.edu>
  *          Laurent Aimar <fenrir@via.ecp.fr>
+ *          Henrik Gramner <henrik@gramner.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -32,31 +33,19 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include <inttypes.h>
+#include <stdarg.h>
 
 #include "config.h"
+
+#ifdef __INTEL_COMPILER
+#include <mathimf.h>
+#else
+#include <math.h>
+#endif
 
 #if !HAVE_LOG2F
 #define log2f(x) (logf(x)/0.693147180559945f)
 #define log2(x) (log(x)/0.693147180559945)
-#endif
-
-#ifdef _WIN32
-#include <io.h>    // _setmode()
-#include <fcntl.h> // _O_BINARY
-#include <stdio.h> // _fileno
-#define set_bin_mode(stream) _setmode(_fileno(stream), _O_BINARY)
-#elif defined(SYS_OS2)
-#include <io.h>         // isatty(), setmode()
-#include <fcntl.h>      // O_BINARY
-#include <stdio.h>      // FILE, fileno()
-
-static inline void set_bin_mode(FILE *stream)
-{
-    if(!isatty(fileno(stream)))
-        setmode(fileno(stream), O_BINARY);
-}
-#else
-#define set_bin_mode(stream)
 #endif
 
 #ifdef __ICL
@@ -68,12 +57,6 @@ static inline void set_bin_mode(FILE *stream)
 #define S_ISREG(x) (((x) & S_IFMT) == S_IFREG)
 #endif
 
-#ifdef __INTEL_COMPILER
-#include <mathimf.h>
-#else
-#include <math.h>
-#endif
-
 #if (defined(__GNUC__) || defined(__INTEL_COMPILER)) && (ARCH_X86 || ARCH_X86_64)
 #define HAVE_X86_INLINE_ASM 1
 #endif
@@ -81,11 +64,29 @@ static inline void set_bin_mode(FILE *stream)
 #if !defined(isfinite) && (SYS_OPENBSD || SYS_SunOS)
 #define isfinite finite
 #endif
+
 #ifdef _WIN32
-#define rename(src,dst) (unlink(dst), rename(src,dst)) // POSIX says that rename() removes the destination, but win32 doesn't.
 #ifndef strtok_r
 #define strtok_r(str,delim,save) strtok(str,delim)
 #endif
+
+#define utf8_to_utf16( utf8, utf16 )\
+    MultiByteToWideChar( CP_UTF8, MB_ERR_INVALID_CHARS, utf8, -1, utf16, sizeof(utf16)/sizeof(wchar_t) )
+FILE *x264_fopen( const char *filename, const char *mode );
+int x264_rename( const char *oldname, const char *newname );
+#define x264_struct_stat struct _stati64
+#define x264_fstat _fstati64
+int x264_stat( const char *path, x264_struct_stat *buf );
+int x264_vfprintf( FILE *stream, const char *format, va_list arg );
+int x264_is_pipe( const char *path );
+#else
+#define x264_fopen       fopen
+#define x264_rename      rename
+#define x264_struct_stat struct stat
+#define x264_fstat       fstat
+#define x264_stat        stat
+#define x264_vfprintf    vfprintf
+#define x264_is_pipe(x)  0
 #endif
 
 #ifdef __ICL
@@ -378,19 +379,19 @@ static ALWAYS_INLINE void x264_prefetch( void *p )
 #define x264_lower_thread_priority(p)
 #endif
 
-static inline uint8_t x264_is_regular_file( FILE *filehandle )
+static inline int x264_is_regular_file( FILE *filehandle )
 {
-    struct stat file_stat;
-    if( fstat( fileno( filehandle ), &file_stat ) )
-        return -1;
+    x264_struct_stat file_stat;
+    if( x264_fstat( fileno( filehandle ), &file_stat ) )
+        return 1;
     return S_ISREG( file_stat.st_mode );
 }
 
-static inline uint8_t x264_is_regular_file_path( const char *filename )
+static inline int x264_is_regular_file_path( const char *filename )
 {
-    struct stat file_stat;
-    if( stat( filename, &file_stat ) )
-        return -1;
+    x264_struct_stat file_stat;
+    if( x264_stat( filename, &file_stat ) )
+        return !x264_is_pipe( filename );
     return S_ISREG( file_stat.st_mode );
 }
 

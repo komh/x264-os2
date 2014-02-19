@@ -1,7 +1,7 @@
 /*****************************************************************************
  * frame.h: frame handling
  *****************************************************************************
- * Copyright (C) 2003-2013 x264 project
+ * Copyright (C) 2003-2014 x264 project
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Loren Merritt <lorenm@u.washington.edu>
@@ -35,6 +35,7 @@
 typedef struct x264_frame
 {
     /* */
+    uint8_t *base;       /* Base pointer for all malloced data in this frame. */
     int     i_poc;
     int     i_delta_poc[2];
     int     i_type;
