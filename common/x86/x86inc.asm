@@ -781,11 +781,12 @@ SECTION .note.GNU-stack noalloc noexec nowrite progbits
             %define movu lddqu
         %endif
         %if ARCH_X86_64 == 0 && notcpuflag(sse2)
-        %ifndef __NASM_VER__
-            CPU basicnop
-        %else
-            %use smartalign
-            ALIGNMODE nop
+            %ifndef __NASM_VER__
+                CPU basicnop
+            %else
+                %use smartalign
+                ALIGNMODE nop
+            %endif
         %endif
     %else
         %xdefine SUFFIX
