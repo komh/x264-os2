@@ -1,9 +1,9 @@
 /*****************************************************************************
- * pixel.h: sparc pixel metrics
+ * quant.h: arm quantization and level-run
  *****************************************************************************
  * Copyright (C) 2005-2014 x264 project
  *
- * Authors: Phil Jensen <philj@csufresno.edu>
+ * Authors: David Conrad <lessen42@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,12 +23,25 @@
  * For more information, contact us at licensing@x264.com.
  *****************************************************************************/
 
-#ifndef X264_SPARC_PIXEL_H
-#define X264_SPARC_PIXEL_H
+#ifndef X264_AARCH64_QUANT_H
+#define X264_AARCH64_QUANT_H
 
-int x264_pixel_sad_8x8_vis  ( uint8_t *, intptr_t, uint8_t *, intptr_t );
-int x264_pixel_sad_8x16_vis ( uint8_t *, intptr_t, uint8_t *, intptr_t );
-int x264_pixel_sad_16x8_vis ( uint8_t *, intptr_t, uint8_t *, intptr_t );
-int x264_pixel_sad_16x16_vis( uint8_t *, intptr_t, uint8_t *, intptr_t );
+int x264_quant_2x2_dc_aarch64( int16_t dct[4], int mf, int bias );
+
+int x264_quant_2x2_dc_neon( int16_t dct[4], int mf, int bias );
+int x264_quant_4x4_dc_neon( int16_t dct[16], int mf, int bias );
+int x264_quant_4x4_neon( int16_t dct[16], uint16_t mf[16], uint16_t bias[16] );
+int x264_quant_4x4x4_neon( int16_t dct[4][16], uint16_t mf[16], uint16_t bias[16] );
+int x264_quant_8x8_neon( int16_t dct[64], uint16_t mf[64], uint16_t bias[64] );
+
+void x264_dequant_4x4_dc_neon( int16_t dct[16], int dequant_mf[6][16], int i_qp );
+void x264_dequant_4x4_neon( int16_t dct[16], int dequant_mf[6][16], int i_qp );
+void x264_dequant_8x8_neon( int16_t dct[64], int dequant_mf[6][64], int i_qp );
+
+int x264_coeff_last4_aarch64( int16_t * );
+int x264_coeff_last8_aarch64( int16_t * );
+int x264_coeff_last15_neon( int16_t * );
+int x264_coeff_last16_neon( int16_t * );
+int x264_coeff_last64_neon( int16_t * );
 
 #endif

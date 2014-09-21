@@ -5,7 +5,7 @@
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Loren Merritt <lorenm@u.washington.edu>
- *          Jason Garrett-Glaser <darkshikari@gmail.com>
+ *          Fiona Glaser <fiona@x264.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -97,11 +97,14 @@ static void x264_frame_dump( x264_t *h )
         int cw = h->param.i_width>>1;
         int ch = h->param.i_height>>CHROMA_V_SHIFT;
         pixel *planeu = x264_malloc( (cw*ch*2+32)*sizeof(pixel) );
-        pixel *planev = planeu + cw*ch + 16;
-        h->mc.plane_copy_deinterleave( planeu, cw, planev, cw, h->fdec->plane[1], h->fdec->i_stride[1], cw, ch );
-        fwrite( planeu, 1, cw*ch*sizeof(pixel), f );
-        fwrite( planev, 1, cw*ch*sizeof(pixel), f );
-        x264_free( planeu );
+        if( planeu )
+        {
+            pixel *planev = planeu + cw*ch + 16;
+            h->mc.plane_copy_deinterleave( planeu, cw, planev, cw, h->fdec->plane[1], h->fdec->i_stride[1], cw, ch );
+            fwrite( planeu, 1, cw*ch*sizeof(pixel), f );
+            fwrite( planev, 1, cw*ch*sizeof(pixel), f );
+            x264_free( planeu );
+        }
     }
     fclose( f );
 }
@@ -412,6 +415,12 @@ static void x264_encoder_thread_init( x264_t *h )
 
 static int x264_validate_parameters( x264_t *h, int b_open )
 {
+    if( !h->param.pf_log )
+    {
+        x264_log( NULL, X264_LOG_ERROR, "pf_log not set! did you forget to call x264_param_default?\n" );
+        return -1;
+    }
+
 #if HAVE_MMX
     if( b_open )
     {
@@ -818,6 +827,8 @@ static int x264_validate_parameters( x264_t *h, int b_open )
         /* 8x8dct is not useful without RD in CAVLC lossless */
         if( !h->param.b_cabac && h->param.analyse.i_subpel_refine < 6 )
             h->param.analyse.b_transform_8x8 = 0;
+        h->param.analyse.inter &= ~X264_ANALYSE_I8x8;
+        h->param.analyse.intra &= ~X264_ANALYSE_I8x8;
     }
     if( h->param.rc.i_rc_method == X264_RC_CQP )
     {
@@ -1403,7 +1414,11 @@ x264_t *x264_encoder_open( x264_param_t *param )
     /* Init x264_t */
     h->i_frame = -1;
     h->i_frame_num = 0;
-    h->i_idr_pic_id = 0;
+
+    if( h->param.i_avcintra_class )
+        h->i_idr_pic_id = 5;
+    else
+        h->i_idr_pic_id = 0;
 
     if( (uint64_t)h->param.i_timebase_den * 2 > UINT32_MAX )
     {
@@ -2154,6 +2169,31 @@ static inline void x264_reference_build_list( x264_t *h, int i_poc )
             h->fref[1][h->i_ref[1]++] = h->frames.reference[i];
     }
 
+    if( h->sh.i_mmco_remove_from_end )
+    {
+        /* Order ref0 for MMCO remove */
+        do
+        {
+            b_ok = 1;
+            for( int i = 0; i < h->i_ref[0] - 1; i++ )
+            {
+                if( h->fref[0][i]->i_frame < h->fref[0][i+1]->i_frame )
+                {
+                    XCHG( x264_frame_t*, h->fref[0][i], h->fref[0][i+1] );
+                    b_ok = 0;
+                    break;
+                }
+            }
+        } while( !b_ok );
+
+        for( int i = h->i_ref[0]-1; i >= h->i_ref[0] - h->sh.i_mmco_remove_from_end; i-- )
+        {
+            int diff = h->i_frame_num - h->fref[0][i]->i_frame_num;
+            h->sh.mmco[h->sh.i_mmco_command_count].i_poc = h->fref[0][i]->i_poc;
+            h->sh.mmco[h->sh.i_mmco_command_count++].i_difference_of_pic_nums = diff;
+        }
+    }
+
     /* Order reference lists by distance from the current frame. */
     for( int list = 0; list < 2; list++ )
     {
@@ -2175,14 +2215,6 @@ static inline void x264_reference_build_list( x264_t *h, int i_poc )
             }
         } while( !b_ok );
     }
-
-    if( h->sh.i_mmco_remove_from_end )
-        for( int i = h->i_ref[0]-1; i >= h->i_ref[0] - h->sh.i_mmco_remove_from_end; i-- )
-        {
-            int diff = h->i_frame_num - h->fref[0][i]->i_frame_num;
-            h->sh.mmco[h->sh.i_mmco_command_count].i_poc = h->fref[0][i]->i_poc;
-            h->sh.mmco[h->sh.i_mmco_command_count++].i_difference_of_pic_nums = diff;
-        }
 
     x264_reference_check_reorder( h );
 
@@ -2438,7 +2470,24 @@ static inline void x264_slice_init( x264_t *h, int i_nal_type, int i_global_qp )
         x264_slice_header_init( h, &h->sh, h->sps, h->pps, h->i_idr_pic_id, h->i_frame_num, i_global_qp );
 
         /* alternate id */
-        h->i_idr_pic_id ^= 1;
+        if( h->param.i_avcintra_class )
+        {
+            switch( h->i_idr_pic_id )
+            {
+                case 5:
+                    h->i_idr_pic_id = 3;
+                    break;
+                case 3:
+                    h->i_idr_pic_id = 4;
+                    break;
+                case 4:
+                default:
+                    h->i_idr_pic_id = 5;
+                    break;
+            }
+        }
+        else
+            h->i_idr_pic_id ^= 1;
     }
     else
     {
@@ -2557,7 +2606,7 @@ static ALWAYS_INLINE void x264_bitstream_restore( x264_t *h, x264_bs_bak_t *bak,
     }
 }
 
-static int x264_slice_write( x264_t *h )
+static intptr_t x264_slice_write( x264_t *h )
 {
     int i_skip;
     int mb_xy, i_mb_x, i_mb_y;
@@ -2567,7 +2616,8 @@ static int x264_slice_write( x264_t *h )
      * other inaccuracies. */
     int overhead_guess = (NALU_OVERHEAD - (h->param.b_annexb && h->out.i_nal)) + 1 + h->param.b_cabac + 5;
     int slice_max_size = h->param.i_slice_max_size > 0 ? (h->param.i_slice_max_size-overhead_guess)*8 : 0;
-    int back_up_bitstream = slice_max_size || (!h->param.b_cabac && h->sps->i_profile_idc < PROFILE_HIGH);
+    int back_up_bitstream_cavlc = !h->param.b_cabac && h->sps->i_profile_idc < PROFILE_HIGH;
+    int back_up_bitstream = slice_max_size || back_up_bitstream_cavlc;
     int starting_bits = bs_pos(&h->out.bs);
     int b_deblock = h->sh.i_disable_deblocking_filter_idc != 1;
     int b_hpel = h->fdec->b_kept_as_ref;
@@ -2575,9 +2625,10 @@ static int x264_slice_write( x264_t *h )
     int thread_last_mb = h->i_threadslice_end * h->mb.i_mb_width - 1;
     uint8_t *last_emu_check;
 #define BS_BAK_SLICE_MAX_SIZE 0
-#define BS_BAK_SLICE_MIN_MBS  1
-#define BS_BAK_ROW_VBV        2
-    x264_bs_bak_t bs_bak[3];
+#define BS_BAK_CAVLC_OVERFLOW 1
+#define BS_BAK_SLICE_MIN_MBS  2
+#define BS_BAK_ROW_VBV        3
+    x264_bs_bak_t bs_bak[4];
     b_deblock &= b_hpel || h->param.b_full_recon || h->param.psz_dump_yuv;
     bs_realign( &h->out.bs );
 
@@ -2630,11 +2681,16 @@ static int x264_slice_write( x264_t *h )
                 x264_fdec_filter_row( h, i_mb_y, 0 );
         }
 
-        if( !(i_mb_y & SLICE_MBAFF) && back_up_bitstream )
+        if( back_up_bitstream )
         {
-            x264_bitstream_backup( h, &bs_bak[BS_BAK_SLICE_MAX_SIZE], i_skip, 0 );
-            if( slice_max_size && (thread_last_mb+1-mb_xy) == h->param.i_slice_min_mbs )
-                x264_bitstream_backup( h, &bs_bak[BS_BAK_SLICE_MIN_MBS], i_skip, 0 );
+            if( back_up_bitstream_cavlc )
+                x264_bitstream_backup( h, &bs_bak[BS_BAK_CAVLC_OVERFLOW], i_skip, 0 );
+            if( slice_max_size && !(i_mb_y & SLICE_MBAFF) )
+            {
+                x264_bitstream_backup( h, &bs_bak[BS_BAK_SLICE_MAX_SIZE], i_skip, 0 );
+                if( (thread_last_mb+1-mb_xy) == h->param.i_slice_min_mbs )
+                    x264_bitstream_backup( h, &bs_bak[BS_BAK_SLICE_MIN_MBS], i_skip, 0 );
+            }
         }
 
         if( PARAM_INTERLACED )
@@ -2698,7 +2754,7 @@ reencode:
                     h->mb.i_skip_intra = 0;
                     h->mb.b_skip_mc = 0;
                     h->mb.b_overflow = 0;
-                    x264_bitstream_restore( h, &bs_bak[BS_BAK_SLICE_MAX_SIZE], &i_skip, 0 );
+                    x264_bitstream_restore( h, &bs_bak[BS_BAK_CAVLC_OVERFLOW], &i_skip, 0 );
                     goto reencode;
                 }
             }
@@ -3532,15 +3588,15 @@ int     x264_encoder_encode( x264_t *h,
                 return -1;
             overhead += h->out.nal[h->out.i_nal-1].i_payload + SEI_OVERHEAD;
         }
+    }
 
-        if( h->param.i_frame_packing >= 0 )
-        {
-            x264_nal_start( h, NAL_SEI, NAL_PRIORITY_DISPOSABLE );
-            x264_sei_frame_packing_write( h, &h->out.bs );
-            if( x264_nal_end( h ) )
-                return -1;
-            overhead += h->out.nal[h->out.i_nal-1].i_payload + SEI_OVERHEAD;
-        }
+    if( h->param.i_frame_packing >= 0 && (h->fenc->b_keyframe || h->param.i_frame_packing == 5) )
+    {
+        x264_nal_start( h, NAL_SEI, NAL_PRIORITY_DISPOSABLE );
+        x264_sei_frame_packing_write( h, &h->out.bs );
+        if( x264_nal_end( h ) )
+            return -1;
+        overhead += h->out.nal[h->out.i_nal-1].i_payload + SEI_OVERHEAD;
     }
 
     /* generate sei pic timing */

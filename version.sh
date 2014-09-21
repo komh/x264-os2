@@ -5,7 +5,7 @@ git_version() {
 trap 'rm -f config.git-hash' EXIT
 git rev-list HEAD | sort > config.git-hash
 LOCALVER=`wc -l config.git-hash | awk '{print $1}'`
-if [ $LOCALVER -gt 1 ] ; then
+if [ $LOCALVER \> 1 ] ; then
     VER=`git rev-list origin/master | sort | join config.git-hash - | wc -l | awk '{print $1}'`
     VER_DIFF=$(($LOCALVER-$VER))
     echo "#define X264_REV $VER"

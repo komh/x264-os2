@@ -5,7 +5,7 @@
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Loren Merritt <lorenm@u.washington.edu>
- *          Jason Garrett-Glaser <darkshikari@gmail.com>
+ *          Fiona Glaser <fiona@x264.com>
  *          Henrik Gramner <henrik@gramner.com>
  *
  * This program is free software; you can redistribute it and/or modify
@@ -729,11 +729,14 @@ void x264_deblock_v_luma_altivec( uint8_t *pix, intptr_t stride, int alpha, int 
 void x264_deblock_h_luma_altivec( uint8_t *pix, intptr_t stride, int alpha, int beta, int8_t *tc0 );
 #endif // ARCH_PPC
 
-#if HAVE_ARMV6
+#if HAVE_ARMV6 || ARCH_AARCH64
 void x264_deblock_v_luma_neon  ( uint8_t *pix, intptr_t stride, int alpha, int beta, int8_t *tc0 );
 void x264_deblock_h_luma_neon  ( uint8_t *pix, intptr_t stride, int alpha, int beta, int8_t *tc0 );
 void x264_deblock_v_chroma_neon( uint8_t *pix, intptr_t stride, int alpha, int beta, int8_t *tc0 );
 void x264_deblock_h_chroma_neon( uint8_t *pix, intptr_t stride, int alpha, int beta, int8_t *tc0 );
+void x264_deblock_strength_neon( uint8_t nnz[X264_SCAN8_SIZE], int8_t ref[2][X264_SCAN8_LUMA_SIZE],
+                                 int16_t mv[2][X264_SCAN8_LUMA_SIZE][2], uint8_t bs[2][8][4],
+                                 int mvy_limit, int bframe );
 #endif
 
 void x264_deblock_init( int cpu, x264_deblock_function_t *pf, int b_mbaff )
@@ -835,13 +838,14 @@ void x264_deblock_init( int cpu, x264_deblock_function_t *pf, int b_mbaff )
    }
 #endif // HAVE_ALTIVEC
 
-#if HAVE_ARMV6
+#if HAVE_ARMV6 || ARCH_AARCH64
    if( cpu&X264_CPU_NEON )
    {
         pf->deblock_luma[1] = x264_deblock_v_luma_neon;
         pf->deblock_luma[0] = x264_deblock_h_luma_neon;
         pf->deblock_chroma[1] = x264_deblock_v_chroma_neon;
         pf->deblock_h_chroma_420 = x264_deblock_h_chroma_neon;
+        pf->deblock_strength     = x264_deblock_strength_neon;
    }
 #endif
 #endif // !HIGH_BIT_DEPTH

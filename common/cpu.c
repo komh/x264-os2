@@ -5,7 +5,7 @@
  *
  * Authors: Loren Merritt <lorenm@u.washington.edu>
  *          Laurent Aimar <fenrir@via.ecp.fr>
- *          Jason Garrett-Glaser <darkshikari@gmail.com>
+ *          Fiona Glaser <fiona@x264.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -44,7 +44,7 @@
 #include <sys/sysctl.h>
 #include <machine/cpu.h>
 #endif
-#ifdef SYS_OS2
+#if SYS_OS2
 #define INCL_DOS
 #include <os2.h>
 #endif
@@ -93,6 +93,9 @@ const x264_cpu_name_t x264_cpu_names[] =
     {"ARMv6",           X264_CPU_ARMV6},
     {"NEON",            X264_CPU_NEON},
     {"FastNeonMRC",     X264_CPU_FAST_NEON_MRC},
+#elif ARCH_AARCH64
+    {"ARMv8",           X264_CPU_ARMV8},
+    {"NEON",            X264_CPU_NEON},
 #endif
     {"", 0},
 };
@@ -308,7 +311,7 @@ uint32_t x264_cpu_detect( void )
             x264_log( NULL, X264_LOG_WARNING, "unable to determine cacheline size\n" );
     }
 
-#if BROKEN_STACK_ALIGNMENT
+#if STACK_ALIGNMENT < 16
     cpu |= X264_CPU_STACK_MOD4;
 #endif
 
@@ -342,6 +345,9 @@ uint32_t x264_cpu_detect( void )
 
 uint32_t x264_cpu_detect( void )
 {
+#ifdef __NO_FPRS__
+    return 0;
+#else
     static void (*oldsig)( int );
 
     oldsig = signal( SIGILL, sigill_handler );
@@ -361,6 +367,7 @@ uint32_t x264_cpu_detect( void )
     signal( SIGILL, oldsig );
 
     return X264_CPU_ALTIVEC;
+#endif
 }
 #endif
 
@@ -409,6 +416,13 @@ uint32_t x264_cpu_detect( void )
     return flags;
 }
 
+#elif ARCH_AARCH64
+
+uint32_t x264_cpu_detect( void )
+{
+    return X264_CPU_ARMV8 | X264_CPU_NEON;
+}
+
 #else
 
 uint32_t x264_cpu_detect( void )
@@ -430,6 +444,10 @@ int x264_cpu_num_processors( void )
     return sysconf( _SC_NPROCESSORS_ONLN );
 
 #elif SYS_LINUX
+#ifdef __ANDROID__
+    // Android NDK does not expose sched_getaffinity
+    return sysconf( _SC_NPROCESSORS_CONF );
+#else
     cpu_set_t p_aff;
     memset( &p_aff, 0, sizeof(p_aff) );
     if( sched_getaffinity( 0, sizeof(p_aff), &p_aff ) )
@@ -441,6 +459,7 @@ int x264_cpu_num_processors( void )
     for( unsigned int bit = 0; bit < 8 * sizeof(p_aff); bit++ )
         np += (((uint8_t *)&p_aff)[bit / 8] >> (bit % 8)) & 1;
     return np;
+#endif
 #endif
 
 #elif SYS_BEOS

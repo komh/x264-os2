@@ -316,8 +316,8 @@ static ALWAYS_INLINE int x264_predictor_difference( int16_t (*mvc)[2], intptr_t 
 
 static ALWAYS_INLINE uint16_t x264_cabac_mvd_sum( uint8_t *mvdleft, uint8_t *mvdtop )
 {
-    int amvd0 = abs(mvdleft[0]) + abs(mvdtop[0]);
-    int amvd1 = abs(mvdleft[1]) + abs(mvdtop[1]);
+    int amvd0 = mvdleft[0] + mvdtop[0];
+    int amvd1 = mvdleft[1] + mvdtop[1];
     amvd0 = (amvd0 > 2) + (amvd0 > 32);
     amvd1 = (amvd1 > 2) + (amvd1 > 32);
     return amvd0 + (amvd1<<8);
@@ -552,15 +552,15 @@ struct x264_t
     int             (*dequant4_mf[4])[16];   /* [4][6][16] */
     int             (*dequant8_mf[4])[64];   /* [4][6][64] */
     /* quantization matrix for trellis, [cqm][qp][coef] */
-    int             (*unquant4_mf[4])[16];   /* [4][QP_MAX_SPEC][16] */
-    int             (*unquant8_mf[4])[64];   /* [4][QP_MAX_SPEC][64] */
+    int             (*unquant4_mf[4])[16];   /* [4][QP_MAX_SPEC+1][16] */
+    int             (*unquant8_mf[4])[64];   /* [4][QP_MAX_SPEC+1][64] */
     /* quantization matrix for deadzone */
-    udctcoef        (*quant4_mf[4])[16];     /* [4][QP_MAX_SPEC][16] */
-    udctcoef        (*quant8_mf[4])[64];     /* [4][QP_MAX_SPEC][64] */
-    udctcoef        (*quant4_bias[4])[16];   /* [4][QP_MAX_SPEC][16] */
-    udctcoef        (*quant8_bias[4])[64];   /* [4][QP_MAX_SPEC][64] */
-    udctcoef        (*quant4_bias0[4])[16];  /* [4][QP_MAX_SPEC][16] */
-    udctcoef        (*quant8_bias0[4])[64];  /* [4][QP_MAX_SPEC][64] */
+    udctcoef        (*quant4_mf[4])[16];     /* [4][QP_MAX_SPEC+1][16] */
+    udctcoef        (*quant8_mf[4])[64];     /* [4][QP_MAX_SPEC+1][64] */
+    udctcoef        (*quant4_bias[4])[16];   /* [4][QP_MAX_SPEC+1][16] */
+    udctcoef        (*quant8_bias[4])[64];   /* [4][QP_MAX_SPEC+1][64] */
+    udctcoef        (*quant4_bias0[4])[16];  /* [4][QP_MAX_SPEC+1][16] */
+    udctcoef        (*quant8_bias0[4])[64];  /* [4][QP_MAX_SPEC+1][64] */
     udctcoef        (*nr_offset_emergency)[4][64];
 
     /* mv/ref cost arrays. */

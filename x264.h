@@ -5,7 +5,7 @@
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Loren Merritt <lorenm@u.washington.edu>
- *          Jason Garrett-Glaser <darkshikari@gmail.com>
+ *          Fiona Glaser <fiona@x264.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -28,8 +28,8 @@
 #ifndef X264_X264_H
 #define X264_X264_H
 
-#if !defined(_STDINT_H) && !defined(_STDINT_H_) && !defined(_STDINT_H_INCLUDED) &&\
-    !defined(_INTTYPES_H) && !defined(_INTTYPES_H_)
+#if !defined(_STDINT_H) && !defined(_STDINT_H_) && !defined(_STDINT_H_INCLUDED) && !defined(_STDINT) &&\
+    !defined(_INTTYPES_H) && !defined(_INTTYPES_H_) && !defined(_INTTYPES)
 # ifdef _MSC_VER
 #  pragma message("You must include stdint.h or inttypes.h before x264.h")
 # else
@@ -152,10 +152,11 @@ typedef struct
 /* PowerPC */
 #define X264_CPU_ALTIVEC         0x0000001
 
-/* ARM */
+/* ARM and AArch64 */
 #define X264_CPU_ARMV6           0x0000001
 #define X264_CPU_NEON            0x0000002  /* ARM NEON */
 #define X264_CPU_FAST_NEON_MRC   0x0000004  /* Transfer from NEON to ARM register is fast (Cortex-A9) */
+#define X264_CPU_ARMV8           0x0000008
 
 /* Analyse flags */
 #define X264_ANALYSE_I4x4       0x0001  /* Analyse i4x4 */
@@ -884,13 +885,15 @@ void    x264_encoder_parameters( x264_t *, x264_param_t * );
 /* x264_encoder_headers:
  *      return the SPS and PPS that will be used for the whole stream.
  *      *pi_nal is the number of NAL units outputted in pp_nal.
+ *      returns the number of bytes in the returned NALs.
  *      returns negative on error.
  *      the payloads of all output NALs are guaranteed to be sequential in memory. */
 int     x264_encoder_headers( x264_t *, x264_nal_t **pp_nal, int *pi_nal );
 /* x264_encoder_encode:
  *      encode one picture.
  *      *pi_nal is the number of NAL units outputted in pp_nal.
- *      returns negative on error, zero if no NAL units returned.
+ *      returns the number of bytes in the returned NALs.
+ *      returns negative on error and zero if no NAL units returned.
  *      the payloads of all output NALs are guaranteed to be sequential in memory. */
 int     x264_encoder_encode( x264_t *, x264_nal_t **pp_nal, int *pi_nal, x264_picture_t *pic_in, x264_picture_t *pic_out );
 /* x264_encoder_close:
