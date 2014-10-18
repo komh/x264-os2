@@ -8,6 +8,12 @@ vpath %.S $(SRCPATH)
 vpath %.asm $(SRCPATH)
 vpath %.rc $(SRCPATH)
 
+ifeq ($(SYS),OS2)
+dlldir = $(libdir)
+else
+dlldir = $(bindir)
+endif
+
 GENERATED =
 
 all: default
@@ -284,8 +290,8 @@ install-lib-static: lib-static install-lib-dev
 
 install-lib-shared: lib-shared install-lib-dev
 ifneq ($(IMPLIBNAME),)
-	$(INSTALL) -d $(DESTDIR)$(bindir)
-	$(INSTALL) -m 755 $(SONAME) $(DESTDIR)$(bindir)
+	$(INSTALL) -d $(DESTDIR)$(dlldir)
+	$(INSTALL) -m 755 $(SONAME) $(DESTDIR)$(dlldir)
 	$(INSTALL) -m 644 $(IMPLIBNAME) $(DESTDIR)$(libdir)
 else ifneq ($(SONAME),)
 	ln -f -s $(SONAME) $(DESTDIR)$(libdir)/libx264.$(SOSUFFIX)
@@ -296,7 +302,7 @@ uninstall:
 	rm -f $(DESTDIR)$(includedir)/x264.h $(DESTDIR)$(includedir)/x264_config.h $(DESTDIR)$(libdir)/libx264.a
 	rm -f $(DESTDIR)$(bindir)/x264$(EXE) $(DESTDIR)$(libdir)/pkgconfig/x264.pc
 ifneq ($(IMPLIBNAME),)
-	rm -f $(DESTDIR)$(bindir)/$(SONAME) $(DESTDIR)$(libdir)/$(IMPLIBNAME)
+	rm -f $(DESTDIR)$(dlldir)/$(SONAME) $(DESTDIR)$(libdir)/$(IMPLIBNAME)
 else ifneq ($(SONAME),)
 	rm -f $(DESTDIR)$(libdir)/$(SONAME) $(DESTDIR)$(libdir)/libx264.$(SOSUFFIX)
 endif
