@@ -178,14 +178,12 @@ $(LIBX264): $(GENERATED) .depend $(OBJS) $(OBJASM)
 	$(AR)$@ $(OBJS) $(OBJASM)
 	$(if $(RANLIB), $(RANLIB) $@)
 
-$(SONAME): $(GENERATED) .depend $(OBJS) $(OBJASM) $(OBJSO)
 ifeq ($(SYS),OS2)
-	echo "LIBRARY $(SONAME:.$(SOSUFFIX)=)" > $(SODEF)
-	echo "DATA MULTIPLE NONSHARED" >> $(SODEF)
-	echo "EXPORTS" >> $(SODEF)
-	emxexp $(OBJS) $(OBJASM) >> $(SODEF)
-	emximp -o $(IMPLIBNAME) $(SODEF)
+$(SONAME): LD := kdllar -cc $(LD)
 endif
+
+$(SONAME): $(GENERATED) .depend $(OBJS) $(OBJASM) $(OBJSO)
+
 	$(LD)$@ $(OBJS) $(OBJASM) $(OBJSO) $(SOFLAGS) $(LDFLAGS)
 
 ifneq ($(EXE),)
@@ -265,7 +263,7 @@ endif
 endif
 
 clean:
-	rm -f $(OBJS) $(OBJASM) $(OBJCLI) $(OBJSO) $(SONAME) $(SODEF) *.a *.lib *.exp *.pdb x264 x264.exe .depend TAGS
+	rm -f $(OBJS) $(OBJASM) $(OBJCLI) $(OBJSO) $(SONAME) *.a *.lib *.exp *.pdb x264 x264.exe .depend TAGS
 	rm -f checkasm checkasm.exe $(OBJCHK) $(GENERATED) x264_lookahead.clbin
 	rm -f $(SRC2:%.c=%.gcda) $(SRC2:%.c=%.gcno) *.dyn pgopti.dpi pgopti.dpi.lock *.pgd *.pgc
 
