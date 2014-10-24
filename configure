@@ -1286,7 +1286,7 @@ if [ "$shared" = "yes" ]; then
         echo "SOFLAGS=-shared -Wl,-h,\$(SONAME) $SOFLAGS" >> config.mak
      elif [ "$SYS" = "OS2" ]; then
          echo "SOSUFFIX=dll" >> config.mak
-         echo "SONAME=libx264.dll" >> config.mak
+         echo "SONAME=x264$API.dll" >> config.mak
          echo "IMPLIBNAME=libx264_dll.a" >> config.mak
          echo "SOFLAGS=-nokeepdef -implib \$(IMPLIBNAME)" >> config.mak
     else
