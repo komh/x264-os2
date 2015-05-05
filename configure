@@ -497,7 +497,6 @@ CC="${CC-${cross_prefix}gcc}"
 AR="${AR-${cross_prefix}ar}"
 RANLIB="${RANLIB-${cross_prefix}ranlib}"
 STRIP="${STRIP-${cross_prefix}strip}"
-INSTALL="${INSTALL-install}"
 
 if [ "x$host" = x ]; then
     host=`${SRCPATH}/config.guess`
