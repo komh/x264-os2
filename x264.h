@@ -29,7 +29,7 @@
 #define X264_X264_H
 
 #if !defined(_STDINT_H) && !defined(_STDINT_H_) && !defined(_STDINT_H_INCLUDED) && !defined(_STDINT) &&\
-    !defined(_INTTYPES_H) && !defined(_INTTYPES_H_) && !defined(_INTTYPES)
+    !defined(_SYS_STDINT_H_) && !defined(_INTTYPES_H) && !defined(_INTTYPES_H_) && !defined(_INTTYPES)
 # ifdef _MSC_VER
 #  pragma message("You must include stdint.h or inttypes.h before x264.h")
 # else
@@ -41,7 +41,7 @@
 
 #include "x264_config.h"
 
-#define X264_BUILD 146
+#define X264_BUILD 148
 
 /* Application developers planning to link against a shared library version of
  * libx264 from a Microsoft Visual Studio or similar development environment
@@ -158,6 +158,9 @@ typedef struct
 #define X264_CPU_FAST_NEON_MRC   0x0000004  /* Transfer from NEON to ARM register is fast (Cortex-A9) */
 #define X264_CPU_ARMV8           0x0000008
 
+/* MIPS */
+#define X264_CPU_MSA             0x0000001  /* MIPS MSA */
+
 /* Analyse flags */
 #define X264_ANALYSE_I4x4       0x0001  /* Analyse i4x4 */
 #define X264_ANALYSE_I8x8       0x0002  /* Analyse i8x8 (requires 8x8 transform) */
@@ -214,16 +217,17 @@ static const char * const x264_nal_hrd_names[] = { "none", "vbr", "cbr", 0 };
 #define X264_CSP_I420           0x0001  /* yuv 4:2:0 planar */
 #define X264_CSP_YV12           0x0002  /* yvu 4:2:0 planar */
 #define X264_CSP_NV12           0x0003  /* yuv 4:2:0, with one y plane and one packed u+v */
-#define X264_CSP_I422           0x0004  /* yuv 4:2:2 planar */
-#define X264_CSP_YV16           0x0005  /* yvu 4:2:2 planar */
-#define X264_CSP_NV16           0x0006  /* yuv 4:2:2, with one y plane and one packed u+v */
-#define X264_CSP_V210           0x0007  /* 10-bit yuv 4:2:2 packed in 32 */
-#define X264_CSP_I444           0x0008  /* yuv 4:4:4 planar */
-#define X264_CSP_YV24           0x0009  /* yvu 4:4:4 planar */
-#define X264_CSP_BGR            0x000a  /* packed bgr 24bits   */
-#define X264_CSP_BGRA           0x000b  /* packed bgr 32bits   */
-#define X264_CSP_RGB            0x000c  /* packed rgb 24bits   */
-#define X264_CSP_MAX            0x000d  /* end of list */
+#define X264_CSP_NV21           0x0004  /* yuv 4:2:0, with one y plane and one packed v+u */
+#define X264_CSP_I422           0x0005  /* yuv 4:2:2 planar */
+#define X264_CSP_YV16           0x0006  /* yvu 4:2:2 planar */
+#define X264_CSP_NV16           0x0007  /* yuv 4:2:2, with one y plane and one packed u+v */
+#define X264_CSP_V210           0x0008  /* 10-bit yuv 4:2:2 packed in 32 */
+#define X264_CSP_I444           0x0009  /* yuv 4:4:4 planar */
+#define X264_CSP_YV24           0x000a  /* yvu 4:4:4 planar */
+#define X264_CSP_BGR            0x000b  /* packed bgr 24bits   */
+#define X264_CSP_BGRA           0x000c  /* packed bgr 32bits   */
+#define X264_CSP_RGB            0x000d  /* packed rgb 24bits   */
+#define X264_CSP_MAX            0x000e  /* end of list */
 #define X264_CSP_VFLIP          0x1000  /* the csp is vertically flipped */
 #define X264_CSP_HIGH_DEPTH     0x2000  /* the csp has a depth of 16 bits per pixel component */
 
@@ -235,7 +239,7 @@ static const char * const x264_nal_hrd_names[] = { "none", "vbr", "cbr", 0 };
 #define X264_TYPE_BREF          0x0004  /* Non-disposable B-frame */
 #define X264_TYPE_B             0x0005
 #define X264_TYPE_KEYFRAME      0x0006  /* IDR or I depending on b_open_gop option */
-#define IS_X264_TYPE_I(x) ((x)==X264_TYPE_I || (x)==X264_TYPE_IDR)
+#define IS_X264_TYPE_I(x) ((x)==X264_TYPE_I || (x)==X264_TYPE_IDR || (x)==X264_TYPE_KEYFRAME)
 #define IS_X264_TYPE_B(x) ((x)==X264_TYPE_B || (x)==X264_TYPE_BREF)
 
 /* Log level */
@@ -790,8 +794,6 @@ typedef struct
     /* In: force picture type (if not auto)
      *     If x264 encoding parameters are violated in the forcing of picture types,
      *     x264 will correct the input picture type and log a warning.
-     *     The quality of frametype decisions may suffer if a great deal of fine-grained
-     *     mixing of auto and forced frametypes is done.
      * Out: type of the picture encoded */
     int     i_type;
     /* In: force quantizer for != X264_QP_AUTO */
