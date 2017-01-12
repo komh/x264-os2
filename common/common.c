@@ -1,7 +1,7 @@
 /*****************************************************************************
  * common.c: misc common functions
  *****************************************************************************
- * Copyright (C) 2003-2015 x264 project
+ * Copyright (C) 2003-2016 x264 project
  *
  * Authors: Loren Merritt <lorenm@u.washington.edu>
  *          Laurent Aimar <fenrir@via.ecp.fr>
@@ -26,7 +26,6 @@
 
 #include "common.h"
 
-#include <stdarg.h>
 #include <ctype.h>
 
 #if HAVE_MALLOC_H
@@ -222,7 +221,6 @@ static int x264_param_apply_preset( x264_param_t *param, const char *preset )
     }
     else if( !strcasecmp( preset, "veryfast" ) )
     {
-        param->analyse.i_me_method = X264_ME_HEX;
         param->analyse.i_subpel_refine = 2;
         param->i_frame_reference = 1;
         param->analyse.b_mixed_references = 0;
@@ -251,11 +249,10 @@ static int x264_param_apply_preset( x264_param_t *param, const char *preset )
     }
     else if( !strcasecmp( preset, "slow" ) )
     {
-        param->analyse.i_me_method = X264_ME_UMH;
         param->analyse.i_subpel_refine = 8;
         param->i_frame_reference = 5;
-        param->i_bframe_adaptive = X264_B_ADAPT_TRELLIS;
         param->analyse.i_direct_mv_pred = X264_DIRECT_PRED_AUTO;
+        param->analyse.i_trellis = 2;
         param->rc.i_lookahead = 50;
     }
     else if( !strcasecmp( preset, "slower" ) )
@@ -582,7 +579,6 @@ int x264_param_parse( x264_param_t *p, const char *name, const char *value )
     int errortype = X264_PARAM_BAD_VALUE;
     int name_was_bool;
     int value_was_null = !value;
-    int i;
 
     if( !name )
         return X264_PARAM_BAD_NAME;
@@ -603,17 +599,18 @@ int x264_param_parse( x264_param_t *p, const char *name, const char *value )
         name = name_buf;
     }
 
-    if( (!strncmp( name, "no-", 3 ) && (i = 3)) ||
-        (!strncmp( name, "no", 2 ) && (i = 2)) )
+    if( !strncmp( name, "no", 2 ) )
     {
-        name += i;
+        name += 2;
+        if( name[0] == '-' )
+            name++;
         value = atobool(value) ? "false" : "true";
     }
     name_was_bool = 0;
 
 #define OPT(STR) else if( !strcmp( name, STR ) )
 #define OPT2(STR0, STR1) else if( !strcmp( name, STR0 ) || !strcmp( name, STR1 ) )
-    if(0);
+    if( 0 );
     OPT("asm")
     {
         p->cpu = isdigit(value[0]) ? atoi(value) :
@@ -628,7 +625,9 @@ int x264_param_parse( x264_param_t *p, const char *name, const char *value )
                 p->cpu = 0;
                 for( init=buf; (tok=strtok_r(init, ",", &saveptr)); init=NULL )
                 {
-                    for( i=0; x264_cpu_names[i].flags && strcasecmp(tok, x264_cpu_names[i].name); i++ );
+                    int i = 0;
+                    while( x264_cpu_names[i].flags && strcasecmp(tok, x264_cpu_names[i].name) )
+                        i++;
                     p->cpu |= x264_cpu_names[i].flags;
                     if( !x264_cpu_names[i].flags )
                         b_error = 1;
@@ -703,14 +702,12 @@ int x264_param_parse( x264_param_t *p, const char *name, const char *value )
     }
     OPT("fps")
     {
-        if( sscanf( value, "%u/%u", &p->i_fps_num, &p->i_fps_den ) == 2 )
-            ;
-        else
+        if( sscanf( value, "%u/%u", &p->i_fps_num, &p->i_fps_den ) != 2 )
         {
-            float fps = atof(value);
-            if( fps > 0 && fps <= INT_MAX/1000 )
+            double fps = atof(value);
+            if( fps > 0.0 && fps <= INT_MAX/1000.0 )
             {
-                p->i_fps_num = (int)(fps * 1000 + .5);
+                p->i_fps_num = (int)(fps * 1000.0 + .5);
                 p->i_fps_den = 1000;
             }
             else

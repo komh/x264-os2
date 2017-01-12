@@ -1,7 +1,7 @@
 /*****************************************************************************
  * cpu.c: cpu detection
  *****************************************************************************
- * Copyright (C) 2003-2015 x264 project
+ * Copyright (C) 2003-2016 x264 project
  *
  * Authors: Loren Merritt <lorenm@u.washington.edu>
  *          Laurent Aimar <fenrir@via.ecp.fr>
@@ -25,9 +25,7 @@
  * For more information, contact us at licensing@x264.com.
  *****************************************************************************/
 
-#define _GNU_SOURCE // for sched_getaffinity
 #include "common.h"
-#include "cpu.h"
 
 #if HAVE_POSIXTHREAD && SYS_LINUX
 #include <sched.h>
@@ -320,9 +318,9 @@ uint32_t x264_cpu_detect( void )
     return cpu;
 }
 
-#elif ARCH_PPC
+#elif ARCH_PPC && HAVE_ALTIVEC
 
-#if SYS_MACOSX || SYS_OPENBSD
+#if SYS_MACOSX || SYS_OPENBSD || SYS_FREEBSD
 #include <sys/sysctl.h>
 uint32_t x264_cpu_detect( void )
 {
@@ -330,12 +328,16 @@ uint32_t x264_cpu_detect( void )
     uint32_t cpu = 0;
 #if SYS_OPENBSD
     int      selectors[2] = { CTL_MACHDEP, CPU_ALTIVEC };
-#else
+#elif SYS_MACOSX
     int      selectors[2] = { CTL_HW, HW_VECTORUNIT };
 #endif
     int      has_altivec = 0;
     size_t   length = sizeof( has_altivec );
+#if SYS_MACOSX || SYS_OPENBSD
     int      error = sysctl( selectors, 2, &has_altivec, &length, NULL, 0 );
+#else
+    int      error = sysctlbyname( "hw.altivec", &has_altivec, &length, NULL, 0 );
+#endif
 
     if( error == 0 && has_altivec != 0 )
         cpu |= X264_CPU_ALTIVEC;
