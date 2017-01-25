@@ -199,7 +199,6 @@ $(SONAME): LD := kdllar -cc $(LD)
 endif
 
 $(SONAME): $(GENERATED) .depend $(OBJS) $(OBJASM) $(OBJSO)
-
 	$(LD)$@ $(OBJS) $(OBJASM) $(OBJSO) $(SOFLAGS) $(LDFLAGS)
 
 ifneq ($(EXE),)
