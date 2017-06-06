@@ -720,10 +720,6 @@ case $host_cpu in
         else
             ASFLAGS="$ASFLAGS -f elf32"
         fi
-        if ! as_check; then
-            AS="nasm"
-            as_check
-        fi
         ;;
     x86_64)
         ARCH="X86_64"
