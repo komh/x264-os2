@@ -1,13 +1,13 @@
 /*****************************************************************************
  * ratecontrol.c: ratecontrol
  *****************************************************************************
- * Copyright (C) 2005-2017 x264 project
+ * Copyright (C) 2005-2024 x264 project
  *
  * Authors: Loren Merritt <lorenm@u.washington.edu>
  *          Michael Niedermayer <michaelni@gmx.at>
  *          Gabriel Bouvigne <gabriel.bouvigne@joost.com>
  *          Fiona Glaser <fiona@x264.com>
- *          Måns Rullgård <mru@mru.ath.cx>
+ *          MÃ¥ns RullgÃ¥rd <mru@mru.ath.cx>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -154,8 +154,9 @@ struct x264_ratecontrol_t
     } mbtree;
 
     /* MBRC stuff */
-    float frame_size_estimated; /* Access to this variable must be atomic: double is
-                                 * not atomic on all arches we care about */
+    volatile float frame_size_estimated; /* Access to this variable must be atomic: double is
+                                          * not atomic on all arches we care about */
+    volatile float bits_so_far;
     double frame_size_maximum;  /* Maximum frame size due to MinCR */
     double frame_size_planned;
     double slice_size_planned;
@@ -243,7 +244,7 @@ static ALWAYS_INLINE uint32_t ac_energy_plane( x264_t *h, int mb_x, int mb_y, x2
     stride <<= b_field;
     if( b_chroma )
     {
-        ALIGNED_ARRAY_32( pixel, pix,[FENC_STRIDE*16] );
+        ALIGNED_ARRAY_64( pixel, pix,[FENC_STRIDE*16] );
         int chromapix = h->luma2chroma_pixel[PIXEL_16x16];
         int shift = 7 - CHROMA_V_SHIFT;
 
@@ -256,7 +257,7 @@ static ALWAYS_INLINE uint32_t ac_energy_plane( x264_t *h, int mb_x, int mb_y, x2
 }
 
 // Find the total AC energy of the block in all planes.
-static NOINLINE uint32_t x264_ac_energy_mb( x264_t *h, int mb_x, int mb_y, x264_frame_t *frame )
+static NOINLINE uint32_t ac_energy_mb( x264_t *h, int mb_x, int mb_y, x264_frame_t *frame )
 {
     /* This function contains annoying hacks because GCC has a habit of reordering emms
      * and putting it after floating point ops.  As a result, we put the emms at the end of the
@@ -278,7 +279,7 @@ static NOINLINE uint32_t x264_ac_energy_mb( x264_t *h, int mb_x, int mb_y, x264_
             var_interlaced  += ac_energy_plane( h, mb_x, mb_y, frame, 2, 0, 1, 1 );
             var_progressive += ac_energy_plane( h, mb_x, mb_y, frame, 2, 0, 0, 0 );
         }
-        else
+        else if( CHROMA_FORMAT )
         {
             var_interlaced  += ac_energy_plane( h, mb_x, mb_y, frame, 1, 1, 1, 1 );
             var_progressive += ac_energy_plane( h, mb_x, mb_y, frame, 1, 1, 0, 0 );
@@ -293,7 +294,7 @@ static NOINLINE uint32_t x264_ac_energy_mb( x264_t *h, int mb_x, int mb_y, x264_
             var += ac_energy_plane( h, mb_x, mb_y, frame, 1, 0, PARAM_INTERLACED, 1 );
             var += ac_energy_plane( h, mb_x, mb_y, frame, 2, 0, PARAM_INTERLACED, 1 );
         }
-        else
+        else if( CHROMA_FORMAT )
             var += ac_energy_plane( h, mb_x, mb_y, frame, 1, 1, PARAM_INTERLACED, 1 );
     }
     x264_emms();
@@ -337,7 +338,7 @@ void x264_adaptive_quant_frame( x264_t *h, x264_frame_t *frame, float *quant_off
         {
             for( int mb_y = 0; mb_y < h->mb.i_mb_height; mb_y++ )
                 for( int mb_x = 0; mb_x < h->mb.i_mb_width; mb_x++ )
-                    x264_ac_energy_mb( h, mb_x, mb_y, frame );
+                    ac_energy_mb( h, mb_x, mb_y, frame );
         }
         else
             return;
@@ -358,7 +359,7 @@ void x264_adaptive_quant_frame( x264_t *h, x264_frame_t *frame, float *quant_off
             for( int mb_y = 0; mb_y < h->mb.i_mb_height; mb_y++ )
                 for( int mb_x = 0; mb_x < h->mb.i_mb_width; mb_x++ )
                 {
-                    uint32_t energy = x264_ac_energy_mb( h, mb_x, mb_y, frame );
+                    uint32_t energy = ac_energy_mb( h, mb_x, mb_y, frame );
                     float qp_adj = powf( energy * bit_depth_correction + 1, 0.125f );
                     frame->f_qp_offset[mb_x + mb_y*h->mb.i_mb_stride] = qp_adj;
                     avg_adj += qp_adj;
@@ -390,7 +391,7 @@ void x264_adaptive_quant_frame( x264_t *h, x264_frame_t *frame, float *quant_off
                 }
                 else
                 {
-                    uint32_t energy = x264_ac_energy_mb( h, mb_x, mb_y, frame );
+                    uint32_t energy = ac_energy_mb( h, mb_x, mb_y, frame );
                     qp_adj = strength * (x264_log2( X264_MAX(energy, 1) ) - (14.427f + 2*(BIT_DEPTH-8)));
                 }
                 if( quant_offsets )
@@ -413,14 +414,14 @@ void x264_adaptive_quant_frame( x264_t *h, x264_frame_t *frame, float *quant_off
     }
 }
 
-static int x264_macroblock_tree_rescale_init( x264_t *h, x264_ratecontrol_t *rc )
+static int macroblock_tree_rescale_init( x264_t *h, x264_ratecontrol_t *rc )
 {
     /* Use fractional QP array dimensions to compensate for edge padding */
     float srcdim[2] = {rc->mbtree.srcdim[0] / 16.f, rc->mbtree.srcdim[1] / 16.f};
     float dstdim[2] = {    h->param.i_width / 16.f,    h->param.i_height / 16.f};
     int srcdimi[2] = {ceil(srcdim[0]), ceil(srcdim[1])};
     int dstdimi[2] = {ceil(dstdim[0]), ceil(dstdim[1])};
-    if( PARAM_INTERLACED )
+    if( h->param.b_interlaced || h->param.b_fake_interlaced )
     {
         srcdimi[1] = (srcdimi[1]+1)&~1;
         dstdimi[1] = (dstdimi[1]+1)&~1;
@@ -486,7 +487,7 @@ fail:
     return -1;
 }
 
-static void x264_macroblock_tree_rescale_destroy( x264_ratecontrol_t *rc )
+static void macroblock_tree_rescale_destroy( x264_ratecontrol_t *rc )
 {
     for( int i = 0; i < 2; i++ )
     {
@@ -505,7 +506,7 @@ static ALWAYS_INLINE float tapfilter( float *src, int pos, int max, int stride, 
     return sum;
 }
 
-static void x264_macroblock_tree_rescale( x264_t *h, x264_ratecontrol_t *rc, float *dst )
+static void macroblock_tree_rescale( x264_t *h, x264_ratecontrol_t *rc, float *dst )
 {
     float *input, *output;
     int filtersize, stride, height;
@@ -553,7 +554,7 @@ int x264_macroblock_tree_read( x264_t *h, x264_frame_t *frame, float *quant_offs
 
                 if( !fread( &i_type, 1, 1, rc->p_mbtree_stat_file_in ) )
                     goto fail;
-                if( fread( rc->mbtree.qp_buffer[rc->mbtree.qpbuf_pos], sizeof(uint16_t), rc->mbtree.src_mb_count, rc->p_mbtree_stat_file_in ) != rc->mbtree.src_mb_count )
+                if( fread( rc->mbtree.qp_buffer[rc->mbtree.qpbuf_pos], sizeof(uint16_t), rc->mbtree.src_mb_count, rc->p_mbtree_stat_file_in ) != (unsigned)rc->mbtree.src_mb_count )
                     goto fail;
 
                 if( i_type != i_type_actual && rc->mbtree.qpbuf_pos == 1 )
@@ -567,14 +568,14 @@ int x264_macroblock_tree_read( x264_t *h, x264_frame_t *frame, float *quant_offs
         float *dst = rc->mbtree.rescale_enabled ? rc->mbtree.scale_buffer[0] : frame->f_qp_offset;
         h->mc.mbtree_fix8_unpack( dst, rc->mbtree.qp_buffer[rc->mbtree.qpbuf_pos], rc->mbtree.src_mb_count );
         if( rc->mbtree.rescale_enabled )
-            x264_macroblock_tree_rescale( h, rc, frame->f_qp_offset );
+            macroblock_tree_rescale( h, rc, frame->f_qp_offset );
         if( h->frames.b_have_lowres )
             for( int i = 0; i < h->mb.i_mb_count; i++ )
                 frame->i_inv_qscale_factor[i] = x264_exp2fix8( frame->f_qp_offset[i] );
         rc->mbtree.qpbuf_pos--;
     }
     else
-        x264_stack_align( x264_adaptive_quant_frame, h, frame, quant_offsets );
+        x264_adaptive_quant_frame( h, frame, quant_offsets );
     return 0;
 fail:
     x264_log( h, X264_LOG_ERROR, "Incomplete MB-tree stats file.\n" );
@@ -608,7 +609,7 @@ int x264_reference_build_list_optimal( x264_t *h )
             COPY2_IF_GT( max, refcount[i], bestref, i );
 
         /* FIXME: If there are duplicates from frames other than ref0 then it is possible
-         * that the optimal ordering doesnt place every duplicate. */
+         * that the optimal ordering doesn't place every duplicate. */
 
         refcount[bestref] = -1;
         h->fref[0][ref] = frames[bestref];
@@ -618,7 +619,7 @@ int x264_reference_build_list_optimal( x264_t *h )
     return 0;
 }
 
-static char *x264_strcat_filename( char *input, char *suffix )
+static char *strcat_filename( char *input, char *suffix )
 {
     char *output = x264_malloc( strlen( input ) + strlen( suffix ) + 1 );
     if( !output )
@@ -713,8 +714,9 @@ void x264_ratecontrol_init_reconfigurable( x264_t *h, int b_init )
         rc->vbv_max_rate = vbv_max_bitrate;
         rc->buffer_size = vbv_buffer_size;
         rc->single_frame_vbv = rc->buffer_rate * 1.1 > rc->buffer_size;
-        rc->cbr_decay = 1.0 - rc->buffer_rate / rc->buffer_size
-                      * 0.5 * X264_MAX(0, 1.5 - rc->buffer_rate * rc->fps / rc->bitrate);
+        if( rc->b_abr && h->param.rc.i_rc_method == X264_RC_ABR )
+            rc->cbr_decay = 1.0 - rc->buffer_rate / rc->buffer_size
+                          * 0.5 * X264_MAX(0, 1.5 - rc->buffer_rate * rc->fps / rc->bitrate);
         if( h->param.rc.i_rc_method == X264_RC_CRF && h->param.rc.f_rf_constant_max )
         {
             rc->rate_factor_max_increment = h->param.rc.f_rf_constant_max - h->param.rc.f_rf_constant;
@@ -771,9 +773,9 @@ int x264_ratecontrol_new( x264_t *h )
     rc->last_non_b_pict_type = -1;
     rc->cbr_decay = 1.0;
 
-    if( h->param.rc.i_rc_method == X264_RC_CRF && h->param.rc.b_stat_read )
+    if( h->param.rc.i_rc_method != X264_RC_ABR && h->param.rc.b_stat_read )
     {
-        x264_log( h, X264_LOG_ERROR, "constant rate-factor is incompatible with 2pass.\n" );
+        x264_log( h, X264_LOG_ERROR, "CRF/CQP is incompatible with 2pass.\n" );
         return -1;
     }
 
@@ -878,7 +880,7 @@ int x264_ratecontrol_new( x264_t *h )
         }
         if( h->param.rc.b_mb_tree )
         {
-            char *mbtree_stats_in = x264_strcat_filename( h->param.rc.psz_stat_in, ".mbtree" );
+            char *mbtree_stats_in = strcat_filename( h->param.rc.psz_stat_in, ".mbtree" );
             if( !mbtree_stats_in )
                 return -1;
             rc->p_mbtree_stat_file_in = x264_fopen( mbtree_stats_in, "rb" );
@@ -941,6 +943,7 @@ int x264_ratecontrol_new( x264_t *h )
             CMP_OPT_FIRST_PASS( "intra_refresh", h->param.b_intra_refresh );
             CMP_OPT_FIRST_PASS( "open_gop", h->param.b_open_gop );
             CMP_OPT_FIRST_PASS( "bluray_compat", h->param.b_bluray_compat );
+            CMP_OPT_FIRST_PASS( "mbtree", h->param.rc.b_mb_tree );
 
             if( (p = strstr( opts, "interlaced=" )) )
             {
@@ -1154,7 +1157,7 @@ parse_error:
     if( h->param.rc.b_stat_write )
     {
         char *p;
-        rc->psz_stat_file_tmpname = x264_strcat_filename( h->param.rc.psz_stat_out, ".temp" );
+        rc->psz_stat_file_tmpname = strcat_filename( h->param.rc.psz_stat_out, ".temp" );
         if( !rc->psz_stat_file_tmpname )
             return -1;
 
@@ -1171,8 +1174,8 @@ parse_error:
         x264_free( p );
         if( h->param.rc.b_mb_tree && !h->param.rc.b_stat_read )
         {
-            rc->psz_mbtree_stat_file_tmpname = x264_strcat_filename( h->param.rc.psz_stat_out, ".mbtree.temp" );
-            rc->psz_mbtree_stat_file_name = x264_strcat_filename( h->param.rc.psz_stat_out, ".mbtree" );
+            rc->psz_mbtree_stat_file_tmpname = strcat_filename( h->param.rc.psz_stat_out, ".mbtree.temp" );
+            rc->psz_mbtree_stat_file_name = strcat_filename( h->param.rc.psz_stat_out, ".mbtree" );
             if( !rc->psz_mbtree_stat_file_tmpname || !rc->psz_mbtree_stat_file_name )
                 return -1;
 
@@ -1192,7 +1195,7 @@ parse_error:
             rc->mbtree.srcdim[0] = h->param.i_width;
             rc->mbtree.srcdim[1] = h->param.i_height;
         }
-        if( x264_macroblock_tree_rescale_init( h, rc ) < 0 )
+        if( macroblock_tree_rescale_init( h, rc ) < 0 )
             return -1;
     }
 
@@ -1235,6 +1238,7 @@ static int parse_zone( x264_t *h, x264_zone_t *z, char *p )
         return 0;
     CHECKED_MALLOC( z->param, sizeof(x264_param_t) );
     memcpy( z->param, &h->param, sizeof(x264_param_t) );
+    z->param->opaque = NULL;
     z->param->param_free = x264_free;
     while( (tok = strtok_r( p, ",", &saveptr )) )
     {
@@ -1313,6 +1317,7 @@ static int parse_zones( x264_t *h )
         rc->zones[0].f_bitrate_factor = 1;
         CHECKED_MALLOC( rc->zones[0].param, sizeof(x264_param_t) );
         memcpy( rc->zones[0].param, &h->param, sizeof(x264_param_t) );
+        rc->zones[0].param->opaque = NULL;
         for( int i = 1; i < rc->i_zones; i++ )
         {
             if( !rc->zones[i].param )
@@ -1327,9 +1332,10 @@ fail:
 
 static x264_zone_t *get_zone( x264_t *h, int frame_num )
 {
-    for( int i = h->rc->i_zones - 1; i >= 0; i-- )
+    x264_ratecontrol_t *rc = h->rc;
+    for( int i = rc->i_zones - 1; i >= 0; i-- )
     {
-        x264_zone_t *z = &h->rc->zones[i];
+        x264_zone_t *z = &rc->zones[i];
         if( frame_num >= z->i_start && frame_num <= z->i_end )
             return z;
     }
@@ -1385,13 +1391,17 @@ void x264_ratecontrol_delete( x264_t *h )
     x264_free( rc->pred_b_from_p );
     x264_free( rc->entry );
     x264_free( rc->entry_out );
-    x264_macroblock_tree_rescale_destroy( rc );
+    macroblock_tree_rescale_destroy( rc );
     if( rc->zones )
     {
+        x264_param_cleanup( rc->zones[0].param );
         x264_free( rc->zones[0].param );
         for( int i = 1; i < rc->i_zones; i++ )
             if( rc->zones[i].param != rc->zones[0].param && rc->zones[i].param->param_free )
+            {
+                x264_param_cleanup( rc->zones[i].param );
                 rc->zones[i].param->param_free( rc->zones[i].param );
+            }
         x264_free( rc->zones );
     }
     x264_free( rc );
@@ -1432,7 +1442,7 @@ void x264_ratecontrol_start( x264_t *h, int i_force_qp, int overhead )
     {
         int frame = h->fenc->i_frame;
         assert( frame >= 0 && frame < rc->num_entries );
-        rce = h->rc->rce = &h->rc->entry[frame];
+        rce = rc->rce = &rc->entry[frame];
 
         if( h->sh.i_type == SLICE_TYPE_B
             && h->param.analyse.i_direct_mv_pred == X264_DIRECT_PRED_AUTO )
@@ -1469,7 +1479,7 @@ void x264_ratecontrol_start( x264_t *h, int i_force_qp, int overhead )
             if( h->i_frame == 0 )
             {
                 //384 * ( Max( PicSizeInMbs, fR * MaxMBPS ) + MaxMBPS * ( tr( 0 ) - tr,n( 0 ) ) ) / MinCR
-                double fr = 1. / 172;
+                double fr = 1. / (h->param.i_level_idc >= 60 ? 300 : 172);
                 int pic_size_in_mbs = h->mb.i_mb_width * h->mb.i_mb_height;
                 rc->frame_size_maximum = 384 * BIT_DEPTH * X264_MAX( pic_size_in_mbs, fr*l->mbps ) / mincr;
             }
@@ -1620,20 +1630,24 @@ int x264_ratecontrol_mb( x264_t *h, int bits )
     float step_size = 0.5f;
     float slice_size_planned = h->param.b_sliced_threads ? rc->slice_size_planned : rc->frame_size_planned;
     float bits_so_far = row_bits_so_far( h, y );
+    rc->bits_so_far = bits_so_far;
     float max_frame_error = x264_clip3f( 1.0 / h->mb.i_mb_height, 0.05, 0.25 );
     float max_frame_size = rc->frame_size_maximum - rc->frame_size_maximum * max_frame_error;
     max_frame_size = X264_MIN( max_frame_size, rc->buffer_fill - rc->buffer_rate * max_frame_error );
     float size_of_other_slices = 0;
     if( h->param.b_sliced_threads )
     {
-        float size_of_other_slices_planned = 0;
+        float bits_so_far_of_other_slices = 0;
         for( int i = 0; i < h->param.i_threads; i++ )
             if( h != h->thread[i] )
             {
                 size_of_other_slices += h->thread[i]->rc->frame_size_estimated;
-                size_of_other_slices_planned += h->thread[i]->rc->slice_size_planned;
+                bits_so_far_of_other_slices += h->thread[i]->rc->bits_so_far;
             }
-        float weight = rc->slice_size_planned / rc->frame_size_planned;
+        float weight = x264_clip3f( (bits_so_far_of_other_slices + rc->frame_size_estimated) / (size_of_other_slices + rc->frame_size_estimated), 0.0, 1.0 );
+        float frame_size_planned = rc->frame_size_planned - rc->frame_size_planned * max_frame_error;
+        float size_of_other_slices_planned = X264_MIN( frame_size_planned, max_frame_size ) - rc->slice_size_planned;
+        size_of_other_slices_planned = X264_MAX( size_of_other_slices_planned, bits_so_far_of_other_slices );
         size_of_other_slices = (size_of_other_slices - size_of_other_slices_planned) * weight + size_of_other_slices_planned;
     }
     if( y < h->i_threadslice_end-1 )
@@ -1652,7 +1666,7 @@ int x264_ratecontrol_mb( x264_t *h, int bits )
         float b1 = bits_so_far + predict_row_size_to_end( h, y, rc->qpm ) + size_of_other_slices;
         float trust_coeff = x264_clip3f( bits_so_far / slice_size_planned, 0.0, 1.0 );
 
-        /* Don't increase the row QPs until a sufficent amount of the bits of the frame have been processed, in case a flat */
+        /* Don't increase the row QPs until a sufficient amount of the bits of the frame have been processed, in case a flat */
         /* area at the top of the frame was measured inaccurately. */
         if( trust_coeff < 0.05f )
             qp_max = qp_absolute_max = prev_row_qp;
@@ -1693,7 +1707,7 @@ int x264_ratecontrol_mb( x264_t *h, int bits )
             b1 = bits_so_far + predict_row_size_to_end( h, y, rc->qpm ) + size_of_other_slices;
         }
 
-        h->rc->frame_size_estimated = b1 - size_of_other_slices;
+        rc->frame_size_estimated = b1 - size_of_other_slices;
 
         /* If the current row was large enough to cause a large QP jump, try re-encoding it. */
         if( rc->qpm > qp_max && prev_row_qp < qp_max && can_reencode_row )
@@ -1709,12 +1723,12 @@ int x264_ratecontrol_mb( x264_t *h, int bits )
     }
     else
     {
-        h->rc->frame_size_estimated = bits_so_far;
+        rc->frame_size_estimated = bits_so_far;
 
         /* Last-ditch attempt: if the last row of the frame underflowed the VBV,
          * try again. */
         if( rc->qpm < qp_max && can_reencode_row
-            && (h->rc->frame_size_estimated + size_of_other_slices > X264_MIN( rc->frame_size_maximum, rc->buffer_fill )) )
+            && (bits_so_far + size_of_other_slices > X264_MIN( rc->frame_size_maximum, rc->buffer_fill )) )
         {
             rc->qpm = qp_max;
             rc->qpa_rc = rc->qpa_rc_prev;
@@ -1767,8 +1781,8 @@ int x264_ratecontrol_slice_type( x264_t *h, int frame_num )
             h->param.rc.i_qp_constant = (h->stat.i_frame_count[SLICE_TYPE_P] == 0) ? 24 + QP_BD_OFFSET
                                       : 1 + h->stat.f_frame_qp[SLICE_TYPE_P] / h->stat.i_frame_count[SLICE_TYPE_P];
             rc->qp_constant[SLICE_TYPE_P] = x264_clip3( h->param.rc.i_qp_constant, 0, QP_MAX );
-            rc->qp_constant[SLICE_TYPE_I] = x264_clip3( (int)( qscale2qp( qp2qscale( h->param.rc.i_qp_constant ) / fabs( h->param.rc.f_ip_factor )) + 0.5 ), 0, QP_MAX );
-            rc->qp_constant[SLICE_TYPE_B] = x264_clip3( (int)( qscale2qp( qp2qscale( h->param.rc.i_qp_constant ) * fabs( h->param.rc.f_pb_factor )) + 0.5 ), 0, QP_MAX );
+            rc->qp_constant[SLICE_TYPE_I] = x264_clip3( (int)( qscale2qp( qp2qscale( h->param.rc.i_qp_constant ) / h->param.rc.f_ip_factor ) + 0.5 ), 0, QP_MAX );
+            rc->qp_constant[SLICE_TYPE_B] = x264_clip3( (int)( qscale2qp( qp2qscale( h->param.rc.i_qp_constant ) * h->param.rc.f_pb_factor ) + 0.5 ), 0, QP_MAX );
 
             x264_log( h, X264_LOG_ERROR, "2nd pass has more frames than 1st pass (%d)\n", rc->num_entries );
             x264_log( h, X264_LOG_ERROR, "continuing anyway, at constant QP=%d\n", h->param.rc.i_qp_constant );
@@ -1820,9 +1834,9 @@ int x264_ratecontrol_end( x264_t *h, int bits, int *filler )
     x264_emms();
 
     h->stat.frame.i_mb_count_skip = mbs[P_SKIP] + mbs[B_SKIP];
-    h->stat.frame.i_mb_count_i = mbs[I_16x16] + mbs[I_8x8] + mbs[I_4x4];
+    h->stat.frame.i_mb_count_i = mbs[I_16x16] + mbs[I_8x8] + mbs[I_4x4] + mbs[I_PCM];
     h->stat.frame.i_mb_count_p = mbs[P_L0] + mbs[P_8x8];
-    for( int i = B_DIRECT; i < B_8x8; i++ )
+    for( int i = B_DIRECT; i <= B_8x8; i++ )
         h->stat.frame.i_mb_count_p += mbs[i];
 
     h->fdec->f_qp_avg_rc = rc->qpa_rc /= h->mb.i_mb_count;
@@ -1893,7 +1907,7 @@ int x264_ratecontrol_end( x264_t *h, int bits, int *filler )
             h->mc.mbtree_fix8_pack( rc->mbtree.qp_buffer[0], h->fenc->f_qp_offset, h->mb.i_mb_count );
             if( fwrite( &i_type, 1, 1, rc->p_mbtree_stat_file_out ) < 1 )
                 goto fail;
-            if( fwrite( rc->mbtree.qp_buffer[0], sizeof(uint16_t), h->mb.i_mb_count, rc->p_mbtree_stat_file_out ) < h->mb.i_mb_count )
+            if( fwrite( rc->mbtree.qp_buffer[0], sizeof(uint16_t), h->mb.i_mb_count, rc->p_mbtree_stat_file_out ) < (unsigned)h->mb.i_mb_count )
                 goto fail;
         }
     }
@@ -1906,7 +1920,7 @@ int x264_ratecontrol_end( x264_t *h, int bits, int *filler )
         {
             /* Depends on the fact that B-frame's QP is an offset from the following P-frame's.
              * Not perfectly accurate with B-refs, but good enough. */
-            rc->cplxr_sum += bits * qp2qscale( rc->qpa_rc ) / (rc->last_rceq * fabs( h->param.rc.f_pb_factor ));
+            rc->cplxr_sum += bits * qp2qscale( rc->qpa_rc ) / (rc->last_rceq * h->param.rc.f_pb_factor);
         }
         rc->cplxr_sum *= rc->cbr_decay;
         rc->wanted_bits_window += h->fenc->f_duration * rc->bitrate;
@@ -2027,18 +2041,14 @@ static double get_diff_limited_q(x264_t *h, ratecontrol_entry_t *rce, double q, 
     x264_zone_t *zone = get_zone( h, frame_num );
 
     // force I/B quants as a function of P quants
-    const double last_p_q    = rcc->last_qscale_for[SLICE_TYPE_P];
-    const double last_non_b_q= rcc->last_qscale_for[rcc->last_non_b_pict_type];
     if( pict_type == SLICE_TYPE_I )
     {
         double iq = q;
         double pq = qp2qscale( rcc->accum_p_qp / rcc->accum_p_norm );
-        double ip_factor = fabs( h->param.rc.f_ip_factor );
+        double ip_factor = h->param.rc.f_ip_factor;
         /* don't apply ip_factor if the following frame is also I */
         if( rcc->accum_p_norm <= 0 )
             q = iq;
-        else if( h->param.rc.f_ip_factor < 0 )
-            q = iq / ip_factor;
         else if( rcc->accum_p_norm >= 1 )
             q = pq / ip_factor;
         else
@@ -2046,16 +2056,15 @@ static double get_diff_limited_q(x264_t *h, ratecontrol_entry_t *rce, double q, 
     }
     else if( pict_type == SLICE_TYPE_B )
     {
-        if( h->param.rc.f_pb_factor > 0 )
-            q = last_non_b_q;
+        q = rcc->last_qscale_for[rcc->last_non_b_pict_type];
         if( !rce->kept_as_ref )
-            q *= fabs( h->param.rc.f_pb_factor );
+            q *= h->param.rc.f_pb_factor;
     }
     else if( pict_type == SLICE_TYPE_P
              && rcc->last_non_b_pict_type == SLICE_TYPE_P
              && rce->tex_bits == 0 )
     {
-        q = last_p_q;
+        q = rcc->last_qscale_for[SLICE_TYPE_P];
     }
 
     /* last qscale / qdiff stuff */
@@ -2211,7 +2220,7 @@ static void update_vbv_plan( x264_t *h, int overhead )
     rcc->buffer_fill = h->thread[0]->rc->buffer_fill_final_min / h->sps->vui.i_time_scale;
     if( h->i_thread_frames > 1 )
     {
-        int j = h->rc - h->thread[0]->rc;
+        int j = rcc - h->thread[0]->rc;
         for( int i = 1; i < h->i_thread_frames; i++ )
         {
             x264_t *t = h->thread[ (j+i)%h->i_thread_frames ];
@@ -2229,7 +2238,7 @@ static void update_vbv_plan( x264_t *h, int overhead )
     rcc->buffer_fill -= overhead;
 }
 
-// apply VBV constraints and clip qscale to between lmin and lmax
+// clip qscale to between lmin and lmax
 static double clip_qscale( x264_t *h, int pict_type, double q )
 {
     x264_ratecontrol_t *rcc = h->rc;
@@ -2237,13 +2246,32 @@ static double clip_qscale( x264_t *h, int pict_type, double q )
     double lmax = rcc->lmax[pict_type];
     if( rcc->rate_factor_max_increment )
         lmax = X264_MIN( lmax, qp2qscale( rcc->qp_novbv + rcc->rate_factor_max_increment ) );
-    double q0 = q;
 
+    if( lmin==lmax )
+        return lmin;
+    else if( rcc->b_2pass )
+    {
+        double min2 = log( lmin );
+        double max2 = log( lmax );
+        q = (log(q) - min2)/(max2-min2) - 0.5;
+        q = 1.0/(1.0 + exp( -4*q ));
+        q = q*(max2-min2) + min2;
+        return exp( q );
+    }
+    else
+        return x264_clip3f( q, lmin, lmax );
+}
+
+// apply VBV constraints
+static double vbv_pass1( x264_t *h, int pict_type, double q )
+{
+    x264_ratecontrol_t *rcc = h->rc;
     /* B-frames are not directly subject to VBV,
      * since they are controlled by the P-frames' QPs. */
 
     if( rcc->b_vbv && rcc->last_satd > 0 )
     {
+        double q0 = q;
         double fenc_cpb_duration = (double)h->fenc->i_cpb_duration *
                                    h->sps->vui.i_num_units_in_tick / h->sps->vui.i_time_scale;
         /* Lookahead VBV: raise the quantizer as necessary such that no frames in
@@ -2346,7 +2374,10 @@ static double clip_qscale( x264_t *h, int pict_type, double q )
                 bframe_cpb_duration += h->fenc->f_planned_cpb_duration[i];
 
             if( bbits * nb > bframe_cpb_duration * rcc->vbv_max_rate )
+            {
                 nb = 0;
+                bframe_cpb_duration = 0;
+            }
             pbbits += nb * bbits;
 
             minigop_cpb_duration = bframe_cpb_duration + fenc_cpb_duration;
@@ -2358,29 +2389,11 @@ static double clip_qscale( x264_t *h, int pict_type, double q )
             q = X264_MAX( q0/2, q );
         }
 
-        /* Apply MinCR and buffer fill restrictions */
-        double bits = predict_size( &rcc->pred[h->sh.i_type], q, rcc->last_satd );
-        double frame_size_maximum = X264_MIN( rcc->frame_size_maximum, X264_MAX( rcc->buffer_fill, 0.001 ) );
-        if( bits > frame_size_maximum )
-            q *= bits / frame_size_maximum;
-
         if( !rcc->b_vbv_min_rate )
             q = X264_MAX( q0, q );
     }
 
-    if( lmin==lmax )
-        return lmin;
-    else if( rcc->b_2pass )
-    {
-        double min2 = log( lmin );
-        double max2 = log( lmax );
-        q = (log(q) - min2)/(max2-min2) - 0.5;
-        q = 1.0/(1.0 + exp( -4*q ));
-        q = q*(max2-min2) + min2;
-        return exp( q );
-    }
-    else
-        return x264_clip3f( q, lmin, lmax );
+    return clip_qscale( h, pict_type, q );
 }
 
 // update qscale for 1 frame based on actual bits used so far
@@ -2442,10 +2455,19 @@ static float rate_estimate_qscale( x264_t *h )
             rcc->frame_size_planned = qscale2bits( &rce, q );
         else
             rcc->frame_size_planned = predict_size( rcc->pred_b_from_p, q, h->fref[1][h->i_ref[1]-1]->i_satd );
-        /* Limit planned size by MinCR */
+
+        /* Apply MinCR and buffer fill restrictions */
         if( rcc->b_vbv )
-            rcc->frame_size_planned = X264_MIN( rcc->frame_size_planned, rcc->frame_size_maximum );
-        h->rc->frame_size_estimated = rcc->frame_size_planned;
+        {
+            double frame_size_maximum = X264_MIN( rcc->frame_size_maximum, X264_MAX( rcc->buffer_fill, 0.001 ) );
+            if( rcc->frame_size_planned > frame_size_maximum )
+            {
+                q *= rcc->frame_size_planned / frame_size_maximum;
+                rcc->frame_size_planned = frame_size_maximum;
+            }
+        }
+
+        rcc->frame_size_estimated = rcc->frame_size_planned;
 
         /* For row SATDs */
         if( rcc->b_vbv )
@@ -2458,7 +2480,7 @@ static float rate_estimate_qscale( x264_t *h )
         double predicted_bits = total_bits;
         if( h->i_thread_frames > 1 )
         {
-            int j = h->rc - h->thread[0]->rc;
+            int j = rcc - h->thread[0]->rc;
             for( int i = 1; i < h->i_thread_frames; i++ )
             {
                 x264_t *t = h->thread[(j+i) % h->i_thread_frames];
@@ -2582,7 +2604,7 @@ static float rate_estimate_qscale( x264_t *h )
                 && rcc->last_non_b_pict_type != SLICE_TYPE_I )
             {
                 q = qp2qscale( rcc->accum_p_qp / rcc->accum_p_norm );
-                q /= fabs( h->param.rc.f_ip_factor );
+                q /= h->param.rc.f_ip_factor;
             }
             else if( h->i_frame > 0 )
             {
@@ -2602,37 +2624,45 @@ static float rate_estimate_qscale( x264_t *h )
             }
             else if( h->param.rc.i_rc_method == X264_RC_CRF && rcc->qcompress != 1 )
             {
-                q = qp2qscale( ABR_INIT_QP ) / fabs( h->param.rc.f_ip_factor );
+                q = qp2qscale( ABR_INIT_QP ) / h->param.rc.f_ip_factor;
             }
             rcc->qp_novbv = qscale2qp( q );
 
-            //FIXME use get_diff_limited_q() ?
-            q = clip_qscale( h, pict_type, q );
+            q = vbv_pass1( h, pict_type, q );
         }
 
         rcc->last_qscale_for[pict_type] =
         rcc->last_qscale = q;
 
         if( !(rcc->b_2pass && !rcc->b_vbv) && h->fenc->i_frame == 0 )
-            rcc->last_qscale_for[SLICE_TYPE_P] = q * fabs( h->param.rc.f_ip_factor );
+            rcc->last_qscale_for[SLICE_TYPE_P] = q * h->param.rc.f_ip_factor;
 
         if( rcc->b_2pass )
             rcc->frame_size_planned = qscale2bits( &rce, q );
         else
             rcc->frame_size_planned = predict_size( &rcc->pred[h->sh.i_type], q, rcc->last_satd );
 
-        /* Always use up the whole VBV in this case. */
-        if( rcc->single_frame_vbv )
-            rcc->frame_size_planned = rcc->buffer_rate;
-        /* Limit planned size by MinCR */
+        /* Apply MinCR and buffer fill restrictions */
         if( rcc->b_vbv )
-            rcc->frame_size_planned = X264_MIN( rcc->frame_size_planned, rcc->frame_size_maximum );
-        h->rc->frame_size_estimated = rcc->frame_size_planned;
+        {
+            double frame_size_maximum = X264_MIN( rcc->frame_size_maximum, X264_MAX( rcc->buffer_fill, 0.001 ) );
+            if( rcc->frame_size_planned > frame_size_maximum )
+            {
+                q *= rcc->frame_size_planned / frame_size_maximum;
+                rcc->frame_size_planned = frame_size_maximum;
+            }
+
+            /* Always use up the whole VBV in this case. */
+            if( rcc->single_frame_vbv )
+                rcc->frame_size_planned = X264_MIN( rcc->buffer_rate, frame_size_maximum );
+        }
+
+        rcc->frame_size_estimated = rcc->frame_size_planned;
         return q;
     }
 }
 
-static void x264_threads_normalize_predictors( x264_t *h )
+static void threads_normalize_predictors( x264_t *h )
 {
     double totalsize = 0;
     for( int i = 0; i < h->param.i_threads; i++ )
@@ -2677,7 +2707,7 @@ void x264_threads_distribute_ratecontrol( x264_t *h )
     }
     if( rc->b_vbv && rc->frame_size_planned )
     {
-        x264_threads_normalize_predictors( h );
+        threads_normalize_predictors( h );
 
         if( rc->single_frame_vbv )
         {
@@ -2688,7 +2718,7 @@ void x264_threads_distribute_ratecontrol( x264_t *h )
                 float max_frame_error = x264_clip3f( 1.0 / (t->i_threadslice_end - t->i_threadslice_start), 0.05, 0.25 );
                 t->rc->slice_size_planned += 2 * max_frame_error * rc->frame_size_planned;
             }
-            x264_threads_normalize_predictors( h );
+            threads_normalize_predictors( h );
         }
 
         for( int i = 0; i < h->param.i_threads; i++ )

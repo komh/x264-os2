@@ -1,7 +1,7 @@
 /*****************************************************************************
  * ffms.c: ffmpegsource input
  *****************************************************************************
- * Copyright (C) 2009-2017 x264 project
+ * Copyright (C) 2009-2024 x264 project
  *
  * Authors: Mike Gurlitz <mike.gurlitz@gmail.com>
  *          Steven Walters <kemuri9@gmail.com>
@@ -27,11 +27,12 @@
 
 #include "input.h"
 #include <ffms.h>
-#define FAIL_IF_ERROR( cond, ... ) FAIL_IF_ERR( cond, "ffms", __VA_ARGS__ )
 
 #undef DECLARE_ALIGNED
 #include <libavcodec/avcodec.h>
 #include <libswscale/swscale.h>
+
+#define FAIL_IF_ERROR( cond, ... ) FAIL_IF_ERR( cond, "ffms", __VA_ARGS__ )
 
 #define PROGRESS_LENGTH 36
 
@@ -189,6 +190,10 @@ static int read_frame( cli_pic_t *pic, hnd_t handle, int i_frame )
 
     memcpy( pic->img.stride, frame->Linesize, sizeof(pic->img.stride) );
     memcpy( pic->img.plane, frame->Data, sizeof(pic->img.plane) );
+    int is_fullrange = 0;
+    pic->img.width   = frame->EncodedWidth;
+    pic->img.height  = frame->EncodedHeight;
+    pic->img.csp     = handle_jpeg( frame->EncodedPixelFormat, &is_fullrange ) | X264_CSP_OTHER;
 
     if( h->vfr_input )
     {

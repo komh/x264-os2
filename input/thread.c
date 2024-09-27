@@ -1,7 +1,7 @@
 /*****************************************************************************
  * thread.c: threaded input
  *****************************************************************************
- * Copyright (C) 2003-2017 x264 project
+ * Copyright (C) 2003-2024 x264 project
  *
  * Authors: Laurent Aimar <fenrir@via.ecp.fr>
  *          Loren Merritt <lorenm@u.washington.edu>
@@ -25,6 +25,9 @@
  *****************************************************************************/
 
 #include "input.h"
+#include "common/common.h"
+
+#define thread_input x264_glue3(thread, BIT_DEPTH, input)
 
 typedef struct
 {
@@ -60,7 +63,7 @@ static int open_file( char *psz_filename, hnd_t *p_handle, video_info_t *info, c
     h->next_args->status = 0;
     h->frame_total = info->num_frames;
 
-    if( x264_threadpool_init( &h->pool, 1, NULL, NULL ) )
+    if( x264_threadpool_init( &h->pool, 1 ) )
         return -1;
 
     *p_handle = h;

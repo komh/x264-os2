@@ -1,7 +1,7 @@
 /*****************************************************************************
  * asm.S: AArch64 utility macros
  *****************************************************************************
- * Copyright (C) 2008-2017 x264 project
+ * Copyright (C) 2008-2024 x264 project
  *
  * Authors: Mans Rullgard <mans@mansr.com>
  *          David Conrad <lessen42@gmail.com>
@@ -27,11 +27,26 @@
 
 #include "config.h"
 
+#define GLUE(a, b) a ## b
+#define JOIN(a, b) GLUE(a, b)
+
 #ifdef PREFIX
-#   define EXTERN_ASM _
+#   define BASE _x264_
+#   define SYM_PREFIX _
 #else
-#   define EXTERN_ASM
+#   define BASE x264_
+#   define SYM_PREFIX
 #endif
+
+#ifdef BIT_DEPTH
+#   define EXTERN_ASM JOIN(JOIN(BASE, BIT_DEPTH), _)
+#else
+#   define EXTERN_ASM BASE
+#endif
+
+#define X(s) JOIN(EXTERN_ASM, s)
+#define X264(s) JOIN(BASE, s)
+#define EXT(s) JOIN(SYM_PREFIX, s)
 
 #ifdef __ELF__
 #   define ELF
@@ -53,7 +68,11 @@
 
 .macro  function name, export=0, align=2
     .macro endfunc
+.if \export
+ELF     .size   EXTERN_ASM\name, . - EXTERN_ASM\name
+.else
 ELF     .size   \name, . - \name
+.endif
 FUNC    .endfunc
         .purgem endfunc
     .endm
@@ -82,29 +101,40 @@ MACH    .const_data
 \name:
 .endm
 
-.macro  movrel rd, val
-#if defined(PIC) && defined(__APPLE__)
+.macro  movrel rd, val, offset=0
+#if defined(__APPLE__)
+  .if \offset < 0
         adrp            \rd, \val@PAGE
         add             \rd, \rd, \val@PAGEOFF
-#elif defined(PIC)
+        sub             \rd, \rd, -(\offset)
+  .else
+        adrp            \rd, \val+(\offset)@PAGE
+        add             \rd, \rd, \val+(\offset)@PAGEOFF
+  .endif
+#elif defined(PIC) && defined(_WIN32)
+  .if \offset < 0
         adrp            \rd, \val
         add             \rd, \rd, :lo12:\val
+        sub             \rd, \rd, -(\offset)
+  .else
+        adrp            \rd, \val+(\offset)
+        add             \rd, \rd, :lo12:\val+(\offset)
+  .endif
+#elif defined(PIC)
+        adrp            \rd, \val+(\offset)
+        add             \rd, \rd, :lo12:\val+(\offset)
 #else
-        ldr             \rd, =\val
+        ldr             \rd, =\val+\offset
 #endif
 .endm
-
-#define GLUE(a, b) a ## b
-#define JOIN(a, b) GLUE(a, b)
-#define X(s) JOIN(EXTERN_ASM, s)
 
 #define FDEC_STRIDE 32
 #define FENC_STRIDE 16
 
 
 .macro SUMSUB_AB   sum, sub, a, b
-    add        \sum,  \a,  \b
-    sub        \sub,  \a,  \b
+    add         \sum,  \a,  \b
+    sub         \sub,  \a,  \b
 .endm
 
 .macro unzip t1, t2, s1, s2
@@ -133,35 +163,35 @@ MACH    .const_data
 
 
 .macro transpose8x8.h r0, r1, r2, r3, r4, r5, r6, r7, r8, r9
-    trn1        \r8\().8H,  \r0\().8H,  \r1\().8H
-    trn2        \r9\().8H,  \r0\().8H,  \r1\().8H
-    trn1        \r1\().8H,  \r2\().8H,  \r3\().8H
-    trn2        \r3\().8H,  \r2\().8H,  \r3\().8H
-    trn1        \r0\().8H,  \r4\().8H,  \r5\().8H
-    trn2        \r5\().8H,  \r4\().8H,  \r5\().8H
-    trn1        \r2\().8H,  \r6\().8H,  \r7\().8H
-    trn2        \r7\().8H,  \r6\().8H,  \r7\().8H
+    trn1        \r8\().8h,  \r0\().8h,  \r1\().8h
+    trn2        \r9\().8h,  \r0\().8h,  \r1\().8h
+    trn1        \r1\().8h,  \r2\().8h,  \r3\().8h
+    trn2        \r3\().8h,  \r2\().8h,  \r3\().8h
+    trn1        \r0\().8h,  \r4\().8h,  \r5\().8h
+    trn2        \r5\().8h,  \r4\().8h,  \r5\().8h
+    trn1        \r2\().8h,  \r6\().8h,  \r7\().8h
+    trn2        \r7\().8h,  \r6\().8h,  \r7\().8h
 
-    trn1        \r4\().4S,  \r0\().4S,  \r2\().4S
-    trn2        \r2\().4S,  \r0\().4S,  \r2\().4S
-    trn1        \r6\().4S,  \r5\().4S,  \r7\().4S
-    trn2        \r7\().4S,  \r5\().4S,  \r7\().4S
-    trn1        \r5\().4S,  \r9\().4S,  \r3\().4S
-    trn2        \r9\().4S,  \r9\().4S,  \r3\().4S
-    trn1        \r3\().4S,  \r8\().4S,  \r1\().4S
-    trn2        \r8\().4S,  \r8\().4S,  \r1\().4S
+    trn1        \r4\().4s,  \r0\().4s,  \r2\().4s
+    trn2        \r2\().4s,  \r0\().4s,  \r2\().4s
+    trn1        \r6\().4s,  \r5\().4s,  \r7\().4s
+    trn2        \r7\().4s,  \r5\().4s,  \r7\().4s
+    trn1        \r5\().4s,  \r9\().4s,  \r3\().4s
+    trn2        \r9\().4s,  \r9\().4s,  \r3\().4s
+    trn1        \r3\().4s,  \r8\().4s,  \r1\().4s
+    trn2        \r8\().4s,  \r8\().4s,  \r1\().4s
 
-    trn1        \r0\().2D,  \r3\().2D,  \r4\().2D
-    trn2        \r4\().2D,  \r3\().2D,  \r4\().2D
+    trn1        \r0\().2d,  \r3\().2d,  \r4\().2d
+    trn2        \r4\().2d,  \r3\().2d,  \r4\().2d
 
-    trn1        \r1\().2D,  \r5\().2D,  \r6\().2D
-    trn2        \r5\().2D,  \r5\().2D,  \r6\().2D
+    trn1        \r1\().2d,  \r5\().2d,  \r6\().2d
+    trn2        \r5\().2d,  \r5\().2d,  \r6\().2d
 
-    trn2        \r6\().2D,  \r8\().2D,  \r2\().2D
-    trn1        \r2\().2D,  \r8\().2D,  \r2\().2D
+    trn2        \r6\().2d,  \r8\().2d,  \r2\().2d
+    trn1        \r2\().2d,  \r8\().2d,  \r2\().2d
 
-    trn1        \r3\().2D,  \r9\().2D,  \r7\().2D
-    trn2        \r7\().2D,  \r9\().2D,  \r7\().2D
+    trn1        \r3\().2d,  \r9\().2d,  \r7\().2d
+    trn2        \r7\().2d,  \r9\().2d,  \r7\().2d
 .endm
 
 .macro  transpose_8x16.b r0, r1, r2, r3, r4, r5, r6, r7, t0, t1

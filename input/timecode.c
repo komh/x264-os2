@@ -1,7 +1,7 @@
 /*****************************************************************************
  * timecode.c: timecode file input
  *****************************************************************************
- * Copyright (C) 2010-2017 x264 project
+ * Copyright (C) 2010-2024 x264 project
  *
  * Authors: Yusuke Nakamura <muken.the.vfrmaniac@gmail.com>
  *
@@ -24,6 +24,7 @@
  *****************************************************************************/
 
 #include "input.h"
+
 #define FAIL_IF_ERROR( cond, ... ) FAIL_IF_ERR( cond, "timecode", __VA_ARGS__ )
 
 typedef struct
@@ -99,12 +100,13 @@ static int parse_tcfile( FILE *tcfile_in, timecode_hnd_t *h, video_info_t *info 
     double *timecodes = NULL;
     double *fpss = NULL;
 
-    ret = fscanf( tcfile_in, "# timecode format v%d", &tcfv );
-    FAIL_IF_ERROR( ret != 1 || (tcfv != 1 && tcfv != 2), "unsupported timecode format\n" );
+    ret = fgets( buff, sizeof(buff), tcfile_in ) != NULL && 
+          (sscanf( buff, "# timecode format v%d", &tcfv ) == 1 || sscanf( buff, "# timestamp format v%d", &tcfv ) == 1);
+    FAIL_IF_ERROR( !ret || (tcfv != 1 && tcfv != 2), "unsupported timecode format\n" );
 #define NO_TIMECODE_LINE (buff[0] == '#' || buff[0] == '\n' || buff[0] == '\r')
     if( tcfv == 1 )
     {
-        uint64_t file_pos;
+        int64_t file_pos;
         double assume_fps, seq_fps;
         int start, end = -1;
         int prev_start = -1, prev_end = -1;
@@ -220,7 +222,7 @@ static int parse_tcfile( FILE *tcfile_in, timecode_hnd_t *h, video_info_t *info 
     }
     else    /* tcfv == 2 */
     {
-        uint64_t file_pos = ftell( tcfile_in );
+        int64_t file_pos = ftell( tcfile_in );
 
         h->stored_pts_num = 0;
         while( fgets( buff, sizeof(buff), tcfile_in ) != NULL )
