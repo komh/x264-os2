@@ -1513,6 +1513,7 @@ else # gcc/icc
     LD="$CC -o "
     LIBX264=libx264.a
     [ -n "$RC" ] && RCFLAGS="$RCFLAGS -I. -o "
+    [ "$SYS" = "OS2" ] && STRIP=     # strip -x corrupts some .o files on OS/2
 fi
 if [ $compiler != GNU ]; then
     CFLAGS="$(cc_cflags $CFLAGS)"
