@@ -32,6 +32,9 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #endif
+#ifdef __OS2__
+#include <sys/param.h>          /* PAGE_SIZE */
+#endif
 
 const x264_cli_csp_t x264_cli_csps[] = {
     [X264_CSP_I400] = { "i400", 1, { 1 },         { 1 },         1, 1 },
@@ -145,6 +148,60 @@ const x264_cli_csp_t *x264_cli_get_csp( int csp )
         return NULL;
     return x264_cli_csps + (csp&X264_CSP_MASK);
 }
+
+#ifdef __OS2__
+/* Simple implementations of mmap() and munmap() missing in OS/2 kLIBC */
+static void *os2_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off)
+{
+    size_t n = 0;
+
+    if( addr != NULL || flags != MAP_PRIVATE || prot != PROT_READ )
+        return errno = EINVAL, MAP_FAILED;
+
+    if( len == 0 )
+        return errno = EINVAL, MAP_FAILED;
+
+    if( posix_memalign( &addr, PAGE_SIZE, len ) != 0 )
+        return errno = ENOMEM, MAP_FAILED;
+
+    while( n < len )
+    {
+        ssize_t count = pread( fd, ( char * )addr + n, len - n, off + n );
+
+        if( count == 0 )
+        {
+            memset(( char * )addr + n, 0, len - n );
+            break;
+        }
+
+        if( count == -1 )
+        {
+            free( addr );
+            return MAP_FAILED;
+        }
+
+        n += count;
+    }
+
+    return addr;
+}
+
+#define mmap os2_mmap
+
+static int os2_munmap(void *addr, size_t len)
+{
+    free( addr );
+
+    return 0;
+}
+
+#define munmap os2_munmap
+
+/* madvise() is not working on OS/2 */
+#undef MADV_WILLNEED
+#undef POSIX_MADV_WILLNEED
+
+#endif
 
 /* Functions for handling memory-mapped input frames */
 int x264_cli_mmap_init( cli_mmap_t *h, FILE *fh )
